@@ -162,10 +162,32 @@ def main(args):
         
         create_task_json(root_json=args.test_ann,
                         cat_names=all_cat_names, offset=0, set_type='test', output_dir=args.output_dir, task_id=known_task_ids)
+    
+    known_task_ids = ''.join(str(i) for i in range(1,task_id+1))
+    all_cat_names = []
 
+    for i in range(1,task_id+1):
+        all_cat_names.extend(task_map[i][0])
+    
+    create_task_json(root_json=args.test_ann,
+                    cat_names=all_cat_names, offset=0, set_type='test', output_dir=args.output_dir, task_id=known_task_ids)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('', parents=[get_args_parser()])
     args = parser.parse_args()
     main(args)
+
+    # task_map, task_label2name =  task_info_coco(split_point=args.split_point)
+
+    # cur_task = task_map[4]
+    # known_task_ids = ''.join(str(i) for i in range(1,5))
+    # all_cat_names = []
+
+    # for i in range(1,5):
+    #     all_cat_names.extend(task_map[i][0])
+    
+    # create_task_json(root_json=args.test_ann,
+    #                 cat_names=all_cat_names, offset=0, set_type='test', output_dir=args.output_dir, task_id=known_task_ids)
+
+
     print ('\n Done .... \n')

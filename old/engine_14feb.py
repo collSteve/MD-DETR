@@ -5,20 +5,18 @@ import tqdm
 import torch
 import utils
 import numpy as np
-import torch.nn as nn
 from copy import deepcopy
 import pytorch_lightning as pl
 import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw
 from datasets.coco_eval import CocoEvaluator
-import torch.nn.functional as F
 from datasets.coco_hug import CocoDetection, task_info_coco, create_task_json
 from transformers_local.models.deformable_detr.image_processing_deformable_detr import DeformableDetrImageProcessor 
 from transformers_local.models.deformable_detr.configuration_deformable_detr import DeformableDetrConfig
 from transformers_local.models.deformable_detr.modeling_deformable_detr import DeformableDetrForObjectDetection
 
 class local_trainer(pl.LightningModule):
-	def __init__(self, train_loader, val_loader, test_dataset, args, local_evaluator, task_id, eval_mode=False):
+	def __init__(self, train_loader, val_loader, test_dataset, args, local_evaluator, task_id):
 		super().__init__()
 
 		detr_config = DeformableDetrConfig()
@@ -26,14 +24,6 @@ class local_trainer(pl.LightningModule):
 		detr_config.PREV_INTRODUCED_CLS = args.task_map[task_id][1]
 		detr_config.CUR_INTRODUCED_CLS = args.task_map[task_id][2]
 		seen_classes = detr_config.PREV_INTRODUCED_CLS + detr_config.CUR_INTRODUCED_CLS
-		
-		#### prompt arguments
-		detr_config.use_prompts = args.use_prompts
-		detr_config.n_tasks = args.n_tasks
-		detr_config.num_prompts = args.num_prompts
-		detr_config.prompt_len = args.prompt_len
-		detr_config.local_query = args.local_query
-
 		self.invalid_cls_logits = list(range(seen_classes, args.n_classes-1)) #unknown class indx will not be included in the invalid class range
 
 		if args.repo_name:
@@ -52,10 +42,6 @@ class local_trainer(pl.LightningModule):
 		#     ignore_mismatched_sizes=True
 		#  )
 		# see https://github.com/PyTorchLightning/pytorch-lightning/pull/1896
-		
-		# if args.local_query:
-		# 	self.alpha = nn.Parameter(torch.rand(1,detr_config.num_queries,1)).to(self.device)
-		
 		self.task_id = task_id
 		self.lr = args.lr
 		self.lr_backbone = args.lr_backbone
@@ -64,7 +50,6 @@ class local_trainer(pl.LightningModule):
 		self.val_loader = val_loader
 		self.test_dataset = test_dataset
 		self.args = args
-		self.eval_mode = eval_mode
 		#self.processor = DetrImageProcessor.from_pretrained(repo_name)
 		self.print_count = 0
 		self.evaluator = local_evaluator
@@ -78,81 +63,19 @@ class local_trainer(pl.LightningModule):
 		outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask)
 		return outputs
 
-	def BG_thresholding(self, results, labels):
-		for i in range(len(results)):
-			lab,box = [], []
-			for s,l,b in zip(results[i]['scores'], results[i]['labels'], results[i]['boxes']):
-				if s < self.args.bg_thres:
-					break
-				if l > self.PREV_INTRODUCED_CLS:
-					continue
-				lab.append(l)
-				box.append(b)
-
-			if lab:
-				#pdb.set_trace()
-				labels[i]['class_labels'] = torch.cat((labels[i]['class_labels'],torch.stack(lab)))
-				labels[i]['boxes'] = torch.cat((labels[i]['boxes'],torch.stack(box)))
-
-		return labels
-	
 	def common_step(self, batch, batch_idx, return_outputs=None):
 		pixel_values = batch["pixel_values"].to(self.device)
 		pixel_mask = batch["pixel_mask"].to(self.device)
 		labels = [{k: v.to(self.device) for k, v in t.items()} for t in batch["labels"]]
-		orig_target_sizes = torch.stack([target["orig_size"] for target in labels], dim=0)
-		
-		if self.args.use_prompts:
-			#pdb.set_trace()
-			with torch.no_grad():
-				outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels,  train=False, task_id=self.task_id)
-				
-				#pdb.set_trace()
 
-				if not self.args.local_query:
-					query = outputs.last_hidden_state.mean(dim=1)
-				else:
-					# query = outputs.last_hidden_state * self.alpha
-					# query = query.sum(dim=1)
-					query = outputs.last_hidden_state
-
-					outputs_without_aux = {k: v for k, v in outputs.items() if k != "auxiliary_outputs" and k != "enc_outputs"}
-
-					# Retrieve the matching between the outputs of the last layer and the targets
-					indices = self.model.matcher(outputs_without_aux, labels)
-					
-					one_hot_proposals = torch.zeros((len(labels),300)).to(self.device)
-					for i,ind in enumerate(indices):
-						for j in ind[0]:
-							#print (j)
-							one_hot_proposals[i][j] = 1
-
-					query_wt = self.model.model.prompts.query_tf(query.view(query.shape[0],-1))
-					query_loss = F.cross_entropy(query_wt, one_hot_proposals)
-					
-				if self.args.bg_thres and not return_outputs:
-					results = self.processor.post_process(outputs, target_sizes=orig_target_sizes, bg_thres_topk=self.args.bg_thres_topk)
-		else:
-			query = None
-		
-		# BG thresholding on previously seen classes
-		# pdb.set_trace()
-
-		if self.args.bg_thres and not return_outputs:
-			labels = self.BG_thresholding(results=results, labels=labels)
-
-		outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels, query=query, train=True, task_id=self.task_id)
+		outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels)
 
 		loss = outputs.loss
 		loss_dict = outputs.loss_dict
 
-		if self.args.local_query:
-			loss_dict['query_loss'] = query_loss
-
-			loss += self.args.lambda_query * query_loss
-
 		if return_outputs:
-
+			orig_target_sizes = torch.stack([target["orig_size"] for target in labels], dim=0)
+		
 			if self.args.mask_gradients:
 				outputs.logits[:,:, self.invalid_cls_logits] = -10e10
 				outputs.logits = outputs.logits[:,:,:self.args.n_classes-1] #removing background class
@@ -174,7 +97,7 @@ class local_trainer(pl.LightningModule):
 		# logs metrics for each training_step,
 		# and the average across the epoch
 		#values = {k:v for k,v in loss_dict.items()}
-		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL'}
+		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox'}
 		self.log("tr", loss, prog_bar=True)
 		for k,v in loss_dict.items():
 			#self.log("train_" + k, v.item(), prog_bar=True)
@@ -191,37 +114,37 @@ class local_trainer(pl.LightningModule):
 		# print ('begin',self.model.class_embed[0].weight[self.PREV_INTRODUCED_CLS:,:].norm())
 		return
 	
-		# def on_train_batch_end(self, *args): # runs after optimizer.step()
-		# 	pdb.set_trace()
-		# 	print ('end',self.model.class_embed[0].weight[:self.PREV_INTRODUCED_CLS,:].norm())
+	# def on_train_batch_end(self, *args): # runs after optimizer.step()
+	# 	pdb.set_trace()
+	# 	print ('end',self.model.class_embed[0].weight[:self.PREV_INTRODUCED_CLS,:].norm())
 
-		# def training_step(self, batch, batch_idx): # manual training schedule
-		# 	opt = self.optimizers()
-		# 	#opt.zero_grad()	
-		# 	loss, loss_dict = self.common_step(batch, batch_idx)
-		# 	# logs metrics for each training_step,
-		# 	# and the average across the epoch
-		# 	#values = {k:v for k,v in loss_dict.items()}
-		# 	short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox'}
-		# 	self.log("tr", loss, prog_bar=True)
-		# 	for k,v in loss_dict.items():
-		# 		#self.log("train_" + k, v.item(), prog_bar=True)
-		# 		self.log(short_map[k], v.item(), prog_bar=True)
-		# 	#pdb.set_trace()
-			
-		# 	self.manual_backward(loss)
+	# def training_step(self, batch, batch_idx): # manual training schedule
+	# 	opt = self.optimizers()
+	# 	#opt.zero_grad()	
+	# 	loss, loss_dict = self.common_step(batch, batch_idx)
+	# 	# logs metrics for each training_step,
+	# 	# and the average across the epoch
+	# 	#values = {k:v for k,v in loss_dict.items()}
+	# 	short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox'}
+	# 	self.log("tr", loss, prog_bar=True)
+	# 	for k,v in loss_dict.items():
+	# 		#self.log("train_" + k, v.item(), prog_bar=True)
+	# 		self.log(short_map[k], v.item(), prog_bar=True)
+	# 	#pdb.set_trace()
+		
+	# 	self.manual_backward(loss)
 
-		# 	for i in range(len(self.model.class_embed)):
-		# 		self.model.class_embed[i].weight.grad[:self.PREV_INTRODUCED_CLS,:] = 0
-		# 		self.model.class_embed[i].bias.grad[:self.PREV_INTRODUCED_CLS] = 0
-		# 	#pdb.set_trace()
-		# 	self.clip_gradients(opt, gradient_clip_val=0.1, gradient_clip_algorithm="norm")
+	# 	for i in range(len(self.model.class_embed)):
+	# 		self.model.class_embed[i].weight.grad[:self.PREV_INTRODUCED_CLS,:] = 0
+	# 		self.model.class_embed[i].bias.grad[:self.PREV_INTRODUCED_CLS] = 0
+	# 	#pdb.set_trace()
+	# 	self.clip_gradients(opt, gradient_clip_val=0.1, gradient_clip_algorithm="norm")
 
-		# 	if (batch_idx + 1) % 32 == 0 or batch_idx == self.trainer.num_train_batches[0]-1:
-		# 		opt.step()
-		# 		opt.zero_grad()
-		# 	#pdb.set_trace()
-		# 	return loss
+	# 	if (batch_idx + 1) % 32 == 0 or batch_idx == self.trainer.num_train_batches[0]-1:
+	# 		opt.step()
+	# 		opt.zero_grad()
+	# 	#pdb.set_trace()
+	# 	return loss
 
 	def on_train_epoch_end(self):
 		self.lr_scheduler.step()
@@ -230,21 +153,17 @@ class local_trainer(pl.LightningModule):
 
 	def validation_step(self, batch, batch_idx):
 		#print (batch_idx)
-		#metric = metric.to(self.device)
 		if batch_idx == 0:
-			if not self.eval_mode:
-				self.coco_evaluator = CocoEvaluator(self.test_dataset.coco, self.args.iou_types)
-			else:
-				self.coco_evaluator  = self.evaluator.coco_evaluator
+			self.coco_evaluator = CocoEvaluator(self.test_dataset.coco, self.args.iou_types)
 
 		loss, loss_dict, res = self.common_step(batch, batch_idx, return_outputs=True)
 		self.coco_evaluator.update(res)
 
 		#print ('\nhere', batch_idx, self.trainer.num_val_batches, '\n')
 
-		# self.log("validation_loss", loss, sync_dist=True)
-		# for k,v in loss_dict.items():
-		# 	self.log("validation_" + k, v.item(), sync_dist=True)
+		self.log("validation_loss", loss, sync_dist=True)
+		for k,v in loss_dict.items():
+			self.log("validation_" + k, v.item(), sync_dist=True)
 
 		if batch_idx == self.trainer.num_val_batches[0]-1:
 		#if True:
@@ -258,7 +177,7 @@ class local_trainer(pl.LightningModule):
 				self.evaluator.print_coco_stats(self.current_epoch, stats, self.print_count)
 				self.print_count = 1
 				if self.args.viz:
-					image_ids = self.evaluator.test_dataset.coco.getImgIds()
+					image_ids = self.test_dataset.coco.getImgIds()
 					#print(image_ids[0:4])
 					for id in image_ids[0:self.args.num_imgs_viz]:
 						self.evaluator.vizualize(id=id)
@@ -266,9 +185,6 @@ class local_trainer(pl.LightningModule):
 			#     f.write()
 
 		return loss
-	
-	# def on_validation_epoch_end(self):
-	# 	do_nothing = 100
 	
 	def save(self, epoch):
 		print('\n Saving at epoch ', epoch, file=self.args.log_file)
@@ -293,10 +209,10 @@ class local_trainer(pl.LightningModule):
 				params.requires_grad = True
 				flag = False
 				for n in name.split('.'):
-					# if n == 'project_prompts':
-					# 	params.requires_grad = True
-					# 	flag = False
-					# 	break
+					if n == 'project_prompts':
+						params.requires_grad = True
+						flag = False
+						break
 					if n in freeze:
 						params.requires_grad = False
 						flag = True
@@ -373,7 +289,7 @@ class local_trainer(pl.LightningModule):
 class Evaluator():
 	def __init__(self, processor, test_dataset, test_dataloader, coco_evaluator, 
 			  task_label2name, args, local_trainer=None, PREV_INTRODUCED_CLS=0, 
-			  CUR_INTRODUCED_CLS=20, local_eval=0, task_id=0, task_name=None):
+			  CUR_INTRODUCED_CLS=20, local_eval=0):
 		
 		self.processor = processor
 		self.local_trainer = local_trainer
@@ -388,8 +304,6 @@ class Evaluator():
 		self.task_label2name = task_label2name
 		self.args = args
 		self.local_eval = local_eval
-		self.task_id = task_id
-		self.task_name = task_name
 
 		#if self.args.mask_gradients:
 		prev_intro_cls = PREV_INTRODUCED_CLS
@@ -433,23 +347,8 @@ class Evaluator():
 		# 	sep = "------------------------------------------------------------------------------- \n------------------------------------------------------------------------------- \n"
 		# else:
 		# 	sep=''
-		
-		# if not self.task_name:
-		# 	if len(self.args.task)>1:
-		# 		task_name = 'Previous Tasks: '+self.args.task
-		# 	else:
-		# 		task_name = 'Current Task: '+self.args.task
-		# else:
-		# 	task_name = 'All seen Tasks: '+self.args.task
 
-		if self.task_name == 'cur':
-			task_name = 'Current Task (mAP@C): '+self.args.task
-		elif self.task_name == 'prev':
-			task_name = 'Previous Tasks (mAP@P): '+self.args.task
-		else:
-			task_name = 'All seen Tasks (mAP@A): '+self.args.task
-
-		output = [task_name,
+		output = ['Task '+self.args.task,
 		'\nAverage Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = '+'%0.2f'%stats[0],
 		'\nAverage Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = '+'%0.2f'%stats[1],
 		'\nAverage Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = '+'%0.2f'%stats[2],
@@ -501,37 +400,16 @@ class Evaluator():
 			pixel_values = batch["pixel_values"].to(device)
 			pixel_mask = batch["pixel_mask"].to(device)
 			labels = [{k: v.to(device) for k, v in t.items()} for t in batch["labels"]] # these are in DETR format, resized + normalized
-			orig_target_sizes = torch.stack([target["orig_size"] for target in labels], dim=0)
 
-			# # forward pass
-			# with torch.no_grad():
-			# 	outputs = model(pixel_values=pixel_values, pixel_mask=pixel_mask)
-
-		
-			if self.args.use_prompts:
-				# pdb.set_trace()
-				with torch.no_grad():
-					outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, train=False, task_id=self.task_id)
-
-					if not self.args.local_query:
-						query = outputs.last_hidden_state.mean(dim=1)
-					else:
-						query = outputs.last_hidden_state
-					
-					# if self.args.bg_thres:
-					# 	results = self.processor.post_process(outputs, target_sizes=orig_target_sizes, bg_thres_topk=self.args.bg_thres_topk)
-			else:
-				query = None
-		
-
-			#pdb.set_trace()
-			outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, query=query, train=False)
+			# forward pass
+			with torch.no_grad():
+				outputs = model(pixel_values=pixel_values, pixel_mask=pixel_mask)
 
 			if self.args.mask_gradients:
 				outputs.logits[:,:, self.invalid_cls_logits] = -10e10
 				outputs.logits = outputs.logits[:,:,:self.args.n_classes-1] #removing background class
 	
-			
+			orig_target_sizes = torch.stack([target["orig_size"] for target in labels], dim=0)
 			results = self.processor.post_process_object_detection(outputs, target_sizes=orig_target_sizes,
 															threshold=0) # convert outputs to COCO api
 			res = {target['image_id'].item(): output for target, output in zip(labels, results)}
@@ -554,13 +432,10 @@ class Evaluator():
 			image_ids = self.test_dataset.coco.getImgIds()
 			#print(image_ids[0:4])
 			for id in image_ids[0:self.args.num_imgs_viz]:
-				try:
-					self.vizualize()
-				except:
-					continue
+				self.vizualize()
 	# def evaluate_allTasks(self):
 
-
+	
 	def vizualize(self, id=None, score_threshold=0.3, device='cuda'):
 		test_dataset = self.test_dataset
 		image_ids = test_dataset.coco.getImgIds()
@@ -587,7 +462,7 @@ class Evaluator():
 			scores.append(1.0)
 			labels.append(class_idx)
 			boxes.append((x,y,x+w,y+h))
-		
+			
 		ax[0].set_title('GT')
 		self.plot_results(image,ax=ax[0],scores=np.array(scores),labels=np.array(labels),boxes=np.array(boxes))
 
@@ -597,24 +472,8 @@ class Evaluator():
 		inputs['pixel_values'] = inputs['pixel_values'].to(device)
 		inputs['pixel_mask'] = inputs['pixel_mask'].to(device)
 
-		# with torch.no_grad():
-		# 	outputs = self.model(**inputs)
-
-		if self.args.use_prompts:
-			#pdb.set_trace()
-			with torch.no_grad():
-				outputs = self.model(pixel_values=inputs['pixel_values'] , pixel_mask=inputs['pixel_mask'], train=False)
-				
-				if not self.args.local_query:
-					query = outputs.last_hidden_state.mean(dim=1)
-				else:
-					query = outputs.last_hidden_state
-		else:
-			query = None
-
-		#pdb.set_trace()
 		with torch.no_grad():
-			outputs = self.model(pixel_values=inputs['pixel_values'] , pixel_mask=inputs['pixel_mask'], query=query, train=False)
+			outputs = self.model(**inputs)
 
 		if self.args.mask_gradients:
 			outputs.logits[:,:, self.invalid_cls_logits] = -10e10

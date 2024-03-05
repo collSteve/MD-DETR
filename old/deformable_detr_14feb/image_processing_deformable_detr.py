@@ -22,7 +22,6 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Un
 import numpy as np
 
 from ...feature_extraction_utils import BatchFeature
-from bisect import bisect_left
 from ...image_processing_utils import BaseImageProcessor, get_size_dict
 from ...image_transforms import (
     PaddingMode,
@@ -1338,7 +1337,7 @@ class DeformableDetrImageProcessor(BaseImageProcessor):
         return encoded_inputs
 
     # POSTPROCESSING METHODS - TODO: add support for other frameworks
-    def post_process(self, outputs, target_sizes, bg_thres_topk=0):
+    def post_process(self, outputs, target_sizes):
         """
         Converts the raw output of [`DeformableDetrForObjectDetection`] into final bounding boxes in (top_left_x,
         top_left_y, bottom_right_x, bottom_right_y) format. Only supports PyTorch.
@@ -1374,31 +1373,16 @@ class DeformableDetrImageProcessor(BaseImageProcessor):
         scores = topk_values
         topk_boxes = torch.div(topk_indexes, out_logits.shape[2], rounding_mode="floor")
         labels = topk_indexes % out_logits.shape[2]
-
-        if not bg_thres_topk:
-            boxes = center_to_corners_format(out_bbox)
-        else:
-            boxes = out_bbox
+        boxes = center_to_corners_format(out_bbox)
         boxes = torch.gather(boxes, 1, topk_boxes.unsqueeze(-1).repeat(1, 1, 4))
 
-        if not bg_thres_topk:
-            # and from relative [0, 1] to absolute [0, height] coordinates
-            img_h, img_w = target_sizes.unbind(1)
-            scale_fct = torch.stack([img_w, img_h, img_w, img_h], dim=1)
-            boxes = boxes * scale_fct[:, None, :]
-            thres = [100]*len(out_logits)
-        else:
-            # thres = []
-            # for i in scores:
-            #     temp = i.detach().cpu().numpy().tolist()
-            #     temp.reverse()
-            #     idx = bisect_left(temp, bg_thres)
-            #     thres.append(100-idx)
-            thres = [bg_thres_topk]*len(out_logits)
+        # and from relative [0, 1] to absolute [0, height] coordinates
+        img_h, img_w = target_sizes.unbind(1)
+        scale_fct = torch.stack([img_w, img_h, img_w, img_h], dim=1)
+        boxes = boxes * scale_fct[:, None, :]
 
-        #print(thres)
-        #import pdb; pdb.set_trace()
-        results = [{"scores": s[:t], "labels": l[:t], "boxes": b[:t]} for s, l, b, t in zip(scores, labels, boxes, thres)]
+        results = [{"scores": s, "labels": l, "boxes": b} for s, l, b in zip(scores, labels, boxes)]
+
         return results
 
     def post_process_object_detection(

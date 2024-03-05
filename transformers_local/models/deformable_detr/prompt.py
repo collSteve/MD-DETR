@@ -4,13 +4,20 @@ import pdb
 import copy
 
 class Prompt(nn.Module):
-    def __init__(self, emb_d, n_tasks, prompt_param, key_dim=768):
+    def __init__(self, emb_d, n_tasks, prompt_param, key_dim=768, args=None):
         super().__init__()
         self.task_count = 0
         self.emb_d = emb_d
         self.key_d = key_dim
         self.n_tasks = n_tasks
         self._init_smart(emb_d, prompt_param)
+
+        if args.local_query:
+            #self.alpha = nn.Parameter(torch.rand(1,300,1), requires_grad=True)
+            self.query_tf = nn.Sequential(
+                            nn.Linear(300*256, 300),
+                            #nn.Linear(786, 300),
+            )
 
         # e prompt init
         for e in self.e_layers:
@@ -131,6 +138,12 @@ class Prompt(nn.Module):
     def forward(self, x_querry, l, x_block, train=False, task_id=None):
 
         # e prompts
+        if len(x_querry.shape) !=2:
+            #print('yes')
+            query_wt = self.query_tf(x_querry.view(x_querry.shape[0],-1))
+            x_querry = x_querry * query_wt.unsqueeze(-1)
+            x_querry = x_querry.sum(dim=1)
+
         e_valid = False
         if l in self.e_layers:
             e_valid = True

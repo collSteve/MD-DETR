@@ -16,7 +16,6 @@
 
 
 import copy
-import pdb
 import math
 import warnings
 from dataclasses import dataclass
@@ -27,7 +26,6 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
-from .prompt import Prompt
 
 from ...activations import ACT2FN
 from ...file_utils import (
@@ -757,7 +755,6 @@ class DeformableDetrMultiheadAttention(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         position_embeddings: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
-        prompt_list=None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         """Input shape: Batch x Time x Channel"""
 
@@ -766,28 +763,16 @@ class DeformableDetrMultiheadAttention(nn.Module):
         if position_embeddings is not None:
             hidden_states_original = hidden_states
             hidden_states = self.with_pos_embed(hidden_states, position_embeddings)
-        
+
         # get queries, keys and values
         query_states = self.q_proj(hidden_states) * self.scaling
-
-        key_states = self.k_proj(hidden_states)
-        value_states = self.v_proj(hidden_states_original)
-
-        if prompt_list is not None:
-            pk, pv = prompt_list
-            key_states = torch.cat((pk,key_states), dim=1)
-            value_states = torch.cat((pv,value_states), dim=1)
-
-        key_states = self._shape(key_states, -1, batch_size)
-        value_states = self._shape(value_states, -1, batch_size)
+        key_states = self._shape(self.k_proj(hidden_states), -1, batch_size)
+        value_states = self._shape(self.v_proj(hidden_states_original), -1, batch_size)
 
         proj_shape = (batch_size * self.num_heads, -1, self.head_dim)
         query_states = self._shape(query_states, target_len, batch_size).view(*proj_shape)
         key_states = key_states.view(*proj_shape)
         value_states = value_states.view(*proj_shape)
-
-        # if prompt_list:
-        #     pdb.set_trace()
 
         source_len = key_states.size(1)
 
@@ -967,7 +952,6 @@ class DeformableDetrDecoderLayer(nn.Module):
         encoder_hidden_states: Optional[torch.Tensor] = None,
         encoder_attention_mask: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = False,
-        prompt_list=None,
     ):
         """
         Args:
@@ -997,11 +981,7 @@ class DeformableDetrDecoderLayer(nn.Module):
             hidden_states=hidden_states,
             position_embeddings=position_embeddings,
             output_attentions=output_attentions,
-            prompt_list=prompt_list,
         )
-
-        # if prompt_list:
-        #     pdb.set_trace()
 
         hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
         hidden_states = residual + hidden_states
@@ -1322,10 +1302,6 @@ class DeformableDetrDecoder(DeformableDetrPreTrainedModel):
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
-        query=None,
-        task_id=None,
-        train=False,
-        prompts=None,
     ):
         r"""
         Args:
@@ -1388,11 +1364,6 @@ class DeformableDetrDecoder(DeformableDetrPreTrainedModel):
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
-            p_list = None
-            if query is not None:
-                p_list, _, output = prompts.forward(query, idx, hidden_states, train=train)
-                #pdb.set_trace()
-
             if self.gradient_checkpointing and self.training:
                 layer_outputs = self._gradient_checkpointing_func(
                     decoder_layer.__call__,
@@ -1411,7 +1382,6 @@ class DeformableDetrDecoder(DeformableDetrPreTrainedModel):
                     level_start_index=level_start_index,
                     encoder_attention_mask=encoder_attention_mask,
                     output_attentions=output_attentions,
-                    prompt_list=p_list,
                 )
 
             hidden_states = layer_outputs[0]
@@ -1487,11 +1457,6 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         backbone = DeformableDetrConvEncoder(config)
         position_embeddings = build_position_encoding(config)
         self.backbone = DeformableDetrConvModel(backbone, position_embeddings)
-
-        if config.use_prompts:
-            self.prompts = Prompt(emb_d=config.d_model, n_tasks=config.n_tasks, 
-                                     prompt_param=[config.num_prompts,config.prompt_len,0],
-                                     key_dim=config.d_model, args=config)
 
         # Create input projection layers
         if config.num_feature_levels > 1:
@@ -1646,9 +1611,6 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        query=None,
-        train=False,
-        task_id=0,
     ) -> Union[Tuple[torch.FloatTensor], DeformableDetrModelOutput]:
         r"""
         Returns:
@@ -1802,10 +1764,6 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             init_reference_points = reference_points
 
         #import pdb; pdb.set_trace()
-        if self.config.use_prompts:
-            prompts = self.prompts
-        else:
-            prompts = None
 
         decoder_outputs = self.decoder(
             inputs_embeds=target,
@@ -1819,10 +1777,6 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            task_id=task_id,
-            prompts=prompts,
-            train=train,
-            query=query,
         )
 
         if not return_dict:
@@ -1869,9 +1823,6 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
         # print(config.num_labels)
 
         self.model = DeformableDetrModel(config)
-        self.matcher = DeformableDetrHungarianMatcher(
-                class_cost=config.class_cost, bbox_cost=config.bbox_cost, giou_cost=config.giou_cost
-            )
 
         if not default:
             prev_intro_cls = config.PREV_INTRODUCED_CLS
@@ -1940,8 +1891,7 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         query = None,
-        train = False,
-        task_id = None,
+        train = False
     ) -> Union[Tuple[torch.FloatTensor], DeformableDetrObjectDetectionOutput]:
         r"""
         labels (`List[Dict]` of len `(batch_size,)`, *optional*):
@@ -1996,12 +1946,7 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            query=query,
-            train=train,
-            task_id=task_id,
         )
-
-        #pdb.set_trace()
 
         hidden_states = outputs.intermediate_hidden_states if return_dict else outputs[2]
         init_reference = outputs.init_reference_points if return_dict else outputs[0]
@@ -2035,16 +1980,18 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
         logits = outputs_class[-1]
         pred_boxes = outputs_coord[-1]
 
-        loss, loss_dict, auxiliary_outputs = None, None, None
-
-        # First: create the matcher
         
-        if labels is not None:
 
+        loss, loss_dict, auxiliary_outputs = None, None, None
+        if labels is not None:
+            # First: create the matcher
+            matcher = DeformableDetrHungarianMatcher(
+                class_cost=self.config.class_cost, bbox_cost=self.config.bbox_cost, giou_cost=self.config.giou_cost
+            )
             # Second: create the criterion
             losses = ["labels", "boxes", "cardinality"]
             criterion = DeformableDetrLoss(
-                matcher=self.matcher,
+                matcher=matcher,
                 num_classes=self.config.num_labels,
                 focal_alpha=self.config.focal_alpha,
                 losses=losses,

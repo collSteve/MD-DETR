@@ -59,7 +59,7 @@ def get_args_parser():
 
     # prompt memory
     parser.add_argument("--use_prompts", type=int, default=1, help="use prompt memory")
-    parser.add_argument("--prompt_len", type=int, default=10, help="length of prompt")
+    parser.add_argument("--prompt_len", type=int, default=5, help="length of prompt")
     parser.add_argument("--num_prompts", type=int, default=10, help="number of prompts in the pool")
     parser.add_argument("--num_prompt_layers", type=int, default=1, help="num of layers for adding prompts")
     parser.add_argument("--prompt_key", type=int, default=1, help="use learnable prompt key")
@@ -103,8 +103,6 @@ def get_args_parser():
 
     ## Cont Setup
     parser.add_argument('--n_tasks', default=4, type=int)
-    parser.add_argument('--lambda_query', default=0, type=float)
-    parser.add_argument('--local_query', default=0, type=int)
     parser.add_argument('--start_task', default=1, type=int)
     parser.add_argument('--task_id', default=0, type=int)
     parser.add_argument('--reset_optim', default=1, type=int)
@@ -113,19 +111,15 @@ def get_args_parser():
     parser.add_argument('--mask_gradients', default=1, type=int)
 
     parser.add_argument('--checkpoint_dir', default='', help='initialized from the pre-training model')
-    parser.add_argument('--checkpoint_base', default='', help='initialized from the pre-training model')
-    parser.add_argument('--checkpoint_next', default='', help='initialized from the pre-training model')
+    parser.add_argument('--checkpoint', default='', help='initialized from the pre-training model')
     parser.add_argument('--num_classes', default=81, type=int)
     
     parser.add_argument('--train_img_dir', default='/ubc/cs/research/shield/datasets/MSCOCO/2017/train2017', type=str)
     parser.add_argument('--test_img_dir', default='/ubc/cs/research/shield/datasets/MSCOCO/2017/val2017', type=str)
     parser.add_argument('--load_task_model', default='/ubc/cs/home/g/gbhatt/borg/cont_learn/runs/hug_demo/checkpoint00.pth', type=str)
     parser.add_argument('--task_ann_dir', default='', type=str)
-    parser.add_argument('--split_point',default=0, type=int)
     #parser.add_argument('--test_ann_dir', default='/ubc/cs/research/shield/datasets/MSCOCO/2017/annotations/instances_val2017.json', type=str)
     parser.add_argument('--bbox_thresh', default=0.3, type=float)
-    parser.add_argument('--bg_thres', default=0.7, type=float)
-    parser.add_argument('--bg_thres_topk', default=5, type=int)
     parser.add_argument('--big_pretrained', default="", type=str)
     return parser
 
@@ -142,8 +136,8 @@ def main(args):
     args.iou_types = ['bbox']
     out_dir_root = args.output_dir
     
-    args.task_map, args.task_label2name =  task_info_coco(split_point=args.split_point)
-    args.task_label2name[args.n_classes-1] = "BG"
+    args.task_map, args.task_label2name =  task_info_coco()
+    args.task_label2name[80] = "BG"
 
     if args.repo_name:
         processor = DeformableDetrImageProcessor.from_pretrained(args.repo_name)
@@ -162,11 +156,6 @@ def main(args):
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
         args.log_file = open(out_dir_root+'/Task_'+str(task_id)+'_log.out', 'a')
         print('Logging: args ', args, file=args.log_file)
-
-        if task_id == 1:
-            args.epochs = 11
-        else:
-            args.epochs = 6
 
         #args.switch = True
         args.task = str(task_id)
@@ -202,17 +191,20 @@ def main(args):
         
         coco_evaluator = CocoEvaluator(test_dataset.coco, args.iou_types)
         local_evaluator = Evaluator(processor=processor, test_dataset=test_dataset,test_dataloader=test_dataloader,
-                                    coco_evaluator=coco_evaluator,args=args,task_label2name=args.task_label2name, task_name='cur')
+                                    coco_evaluator=coco_evaluator,args=args,task_label2name=args.task_label2name)
         
         trainer = local_trainer(train_loader=train_dataloader,val_loader=test_dataloader,
                                       test_dataset=test_dataset,args=args,local_evaluator=local_evaluator,task_id=task_id)
         
-        if args.use_prompts:
-            print ('previous task : ', trainer.model.model.prompts.task_count, file=args.log_file)
-            trainer.model.model.prompts.set_task_id(task_id-1)
-            print ('current task : ', trainer.model.model.prompts.task_count, file=args.log_file)
 
         if task_id>1:
+            prev_task_ids = ''.join(str(i) for i in range(1,task_id))
+            tst_ann_prev = os.path.join(args.task_ann_dir,'test_task_'+str(prev_task_ids)+'.json')
+            test_dataset_prev = CocoDetection(img_folder=args.test_img_dir, 
+                                        ann_file=tst_ann_prev, processor=processor)
+            test_dataloader_prev = DataLoader(test_dataset_prev, collate_fn=test_dataset_prev.collate_fn, batch_size=args.batch_size,
+                                    num_workers=args.num_workers)
+            
             #prev_task =  os.path.join(args.out_dir_root, 'Task_'+str(task_id-1), 'checkpoint'+str(args.epochs-1)+'.pth')
             if not args.eval:
                 if args.resume:
@@ -223,85 +215,39 @@ def main(args):
             else:
                 prev_task = args.checkpoint_dir.replace('Task_1','Task_'+str(task_id))
             
-            if task_id == args.start_task:
-                trainer.resume(os.path.join(prev_task,args.checkpoint_base))
-            else:
-                trainer.resume(os.path.join(prev_task,args.checkpoint_next))
+            trainer.resume(os.path.join(prev_task,args.checkpoint))
         else:
             if not args.eval:
                 if args.repo_name:
                     trainer.resume()
                 args.resume=0
             else:
-                trainer.resume(os.path.join(args.checkpoint_dir,args.checkpoint_base))
+                trainer.resume(os.path.join(args.checkpoint_dir,args.checkpoint))
 
-        ####################### Training/Evaluating on Current classes ################################################
         if args.eval:
             trainer.evaluator.local_eval = 1
-            # trainer.evaluator.evaluate()
-            pyl_trainer.validate(trainer,test_dataloader)
+            trainer.evaluator.evaluate()
         else:
             pyl_trainer.fit(trainer, train_dataloader, test_dataloader)
         #trainer.train_task(task_id=task_id, task_info=cur_task, task_map=task_label2name)
-        #############################################################################################################
-        
-        if task_id>1:
 
-            ####################### Evaluating on previous classes ###################################################
-            prev_task_ids = ''.join(str(i) for i in range(1,task_id))
-            tst_ann_prev = os.path.join(args.task_ann_dir,'test_task_'+str(prev_task_ids)+'.json')
-            test_dataset_prev = CocoDetection(img_folder=args.test_img_dir, 
-                                        ann_file=tst_ann_prev, processor=processor)
-            test_dataloader_prev = DataLoader(test_dataset_prev, collate_fn=test_dataset_prev.collate_fn, batch_size=args.batch_size,
-                                    num_workers=args.num_workers)
+        if task_id>1:
+            # args.switch = False
             args.task = prev_task_ids
-        
             if len(args.task) == 1:
                 args.task = '01'
+            # Evaluating all known classes
             coco_evaluator = CocoEvaluator(test_dataset_prev.coco, args.iou_types)
             local_evaluator = Evaluator(processor=processor, test_dataset=test_dataset_prev,test_dataloader=test_dataloader_prev,
                                         coco_evaluator=coco_evaluator,args=args,task_label2name=args.task_label2name,
-                                        local_trainer=trainer, local_eval=1, task_name='prev')
+                                        local_trainer=trainer, local_eval=1)
             PREV_INTRODUCED_CLS = args.task_map[task_id][1]
             CUR_INTRODUCED_CLS = args.task_map[task_id][2]
 
             seen_classes = PREV_INTRODUCED_CLS + CUR_INTRODUCED_CLS
             invalid_cls_logits = list(range(seen_classes, args.n_classes-1))
             local_evaluator.invalid_cls_logits = invalid_cls_logits
-
-            trainer.evaluator = local_evaluator
-            trainer.evaluator.model = trainer.model
-            trainer.eval_mode = True
-            pyl_trainer.validate(trainer,test_dataloader_prev)
-            #local_evaluator.evaluate()
-            ##########################################################################################################
-
-            ####################### Evaluating on all known classes ###################################################
-            known_task_ids = ''.join(str(i) for i in range(1,task_id+1))
-            tst_ann_known = os.path.join(args.task_ann_dir,'test_task_'+str(known_task_ids)+'.json')
-            test_dataset_known = CocoDetection(img_folder=args.test_img_dir, 
-                                        ann_file=tst_ann_known, processor=processor)
-            test_dataloader_known = DataLoader(test_dataset_known, collate_fn=test_dataset_known.collate_fn, batch_size=args.batch_size,
-                                    num_workers=args.num_workers)
-            
-            args.task = known_task_ids
-            coco_evaluator = CocoEvaluator(test_dataset_known.coco, args.iou_types)
-            local_evaluator = Evaluator(processor=processor, test_dataset=test_dataset_known,test_dataloader=test_dataloader_known,
-                                        coco_evaluator=coco_evaluator,args=args,task_label2name=args.task_label2name,
-                                        local_trainer=trainer, local_eval=1, task_name='all')
-            PREV_INTRODUCED_CLS = args.task_map[task_id][1]
-            CUR_INTRODUCED_CLS = args.task_map[task_id][2]
-
-            seen_classes = PREV_INTRODUCED_CLS + CUR_INTRODUCED_CLS
-            invalid_cls_logits = list(range(seen_classes, args.n_classes-1))
-            local_evaluator.invalid_cls_logits = invalid_cls_logits
-
-            trainer.evaluator = local_evaluator
-            trainer.evaluator.model = trainer.model
-            trainer.eval_mode = True
-            pyl_trainer.validate(trainer,test_dataloader_known)
-            #local_evaluator.evaluate()
-            ##########################################################################################################
+            local_evaluator.evaluate()
 
         args.log_file.close()
 
@@ -317,5 +263,5 @@ if __name__ == '__main__':
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     main(args)
 
-    #if args.eval:
-    utils.print_final(out_dir=out_dir, start_task=args.start_task, n_tasks=args.n_tasks)
+    if args.eval:
+        utils.print_final(out_dir=out_dir, start_task=args.start_task, n_tasks=args.n_tasks)
