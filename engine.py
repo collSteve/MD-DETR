@@ -16,6 +16,7 @@ from datasets.coco_hug import CocoDetection, task_info_coco, create_task_json
 from models.image_processing_deformable_detr import DeformableDetrImageProcessor 
 from models.configuration_deformable_detr import DeformableDetrConfig
 from models.modeling_deformable_detr import DeformableDetrForObjectDetection
+from models.md_detr.modeling_md_detr import MDDetrForObjectDetection
 
 class local_trainer(pl.LightningModule):
 	def __init__(self, train_loader, val_loader, test_dataset, args, local_evaluator, task_id, eval_mode=False):
@@ -37,12 +38,12 @@ class local_trainer(pl.LightningModule):
 		self.invalid_cls_logits = list(range(seen_classes, args.n_classes-1)) #unknown class indx will not be included in the invalid class range
 
 		if args.repo_name:
-			self.model =  DeformableDetrForObjectDetection.from_pretrained(args.repo_name,config=detr_config,
+			self.model =  MDDetrForObjectDetection.from_pretrained(args.repo_name,config=detr_config,
 																	ignore_mismatched_sizes=True,
 																	default=not(args.mask_gradients), log_file=args.log_file)
 			self.processor = DeformableDetrImageProcessor.from_pretrained(args.repo_name)
 		else:
-			self.model = DeformableDetrForObjectDetection(detr_config, default=not(args.mask_gradients),
+			self.model = MDDetrForObjectDetection(detr_config, default=not(args.mask_gradients),
 												 log_file=args.log_file)
 			
 			self.processor = DeformableDetrImageProcessor()
@@ -128,7 +129,7 @@ class local_trainer(pl.LightningModule):
 		loss = outputs.loss
 		loss_dict = outputs.loss_dict
 
-		if self.args.local_query:
+		if self.args.local_query and self.args.use_prompts:
 			loss_dict['query_loss'] = query_loss
 
 			loss += self.args.lambda_query * query_loss

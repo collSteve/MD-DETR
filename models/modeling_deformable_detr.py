@@ -1869,6 +1869,8 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
         # print(config.num_labels)
 
         self.model = DeformableDetrModel(config)
+
+        # Q: why is this here?
         self.matcher = DeformableDetrHungarianMatcher(
                 class_cost=config.class_cost, bbox_cost=config.bbox_cost, giou_cost=config.giou_cost
             )
@@ -1889,6 +1891,7 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
             input_dim=config.d_model, hidden_dim=config.d_model, output_dim=4, num_layers=3
         )
 
+        # Q: What is this? 
         prior_prob = 0.01
         bias_value = -math.log((1 - prior_prob) / prior_prob)
         self.class_embed.bias.data = torch.ones(config.num_labels) * bias_value
