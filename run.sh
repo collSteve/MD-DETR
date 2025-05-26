@@ -23,20 +23,25 @@ if [[ $train -gt 0 ]]
 then
 echo "Training ... "${exp_name}
 LD_DIR=/ubc/cs/home/g/gbhatt/borg/cont_learn/runs/QL_NN_0.1_10
+
+mkdir -p "${EXP_DIR}"/logs
+
 python main.py \
     --output_dir ${EXP_DIR} --train_img_dir ${tr_dir} --test_img_dir ${val_dir} --task_ann_dir ${task_ann_dir} --repo_name=${repo_name} \
-    --n_gpus 8 --batch_size 1 --epochs 6 --lr 1e-4 --lr_old 1e-5 --n_classes=81 --num_workers=2 --split_point=$split_point \
+    --n_gpus 1 --batch_size 7 --epochs 6 --lr 1e-4 --lr_old 1e-5 --n_classes=81 --num_workers=2 --split_point=$split_point \
     --use_prompts $use_prompts --num_prompts $num_prompts --prompt_len=$plen --freeze=${freeze} --viz --new_params=${new_params} \
     --start_task=1 --n_tasks=4 --save_epochs=1 --eval_epochs=1  --bg_thres=0.65 --bg_thres_topk=5 --local_query=1 --lambda_query=0.1 \
     --checkpoint_dir ${LD_DIR}'/Task_1' --checkpoint_base 'checkpoint10.pth' --checkpoint_next 'checkpoint05.pth' --resume=0
 else
 echo "Evaluating ..."
-exp_name="outputs"
+exp_name="outputs_prompt"
 # EXP_DIR=/ubc/cs/home/g/gbhatt/borg/cont_learn/runs/${exp_name}
 # LD_DIR=/ubc/cs/home/g/gbhatt/borg/cont_learn/runs/checkpoints
 
 EXP_DIR=/h/stevev/MD_DETR_runs/${exp_name}
 LD_DIR=/h/stevev/MD_DETR_runs/upload/checkpoints
+
+mkdir -p "${EXP_DIR}"/logs
 
 python main.py \
     --output_dir ${EXP_DIR} --train_img_dir ${tr_dir} --test_img_dir ${val_dir} --task_ann_dir ${task_ann_dir} \
