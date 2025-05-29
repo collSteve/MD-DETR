@@ -652,6 +652,8 @@ class DeformableDetrMultiscaleDeformableAttention(nn.Module):
         level_start_index=None,
         output_attentions: bool = False,
     ):
+        # print("atten hidden_states:")
+        # print(hidden_states)
         # add position embeddings to the hidden states before projecting to queries and keys
         if position_embeddings is not None:
             hidden_states = self.with_pos_embed(hidden_states, position_embeddings)
@@ -709,7 +711,14 @@ class DeformableDetrMultiscaleDeformableAttention(nn.Module):
             except Exception:
                 # PyTorch implementation
                 output = multi_scale_deformable_attention(value, spatial_shapes, sampling_locations, attention_weights)
+        # print("atten output 1:")
+        # print(output)
+        
+        
         output = self.output_proj(output)
+        # print("atten output 2:")
+        # print(output)
+
 
         return output, attention_weights
 
@@ -766,25 +775,48 @@ class DeformableDetrMultiheadAttention(nn.Module):
         if position_embeddings is not None:
             hidden_states_original = hidden_states
             hidden_states = self.with_pos_embed(hidden_states, position_embeddings)
+
+        # print("inside self atten hidden_states 1:")
+        # print("has nans:" + str(torch.isnan(hidden_states).any()))
+
         
         # get queries, keys and values
         query_states = self.q_proj(hidden_states) * self.scaling
 
         key_states = self.k_proj(hidden_states)
+
+        # print("inside self atten key_states 1:")
+        # print("has nans:" + str(torch.isnan(key_states).any()))
+
         value_states = self.v_proj(hidden_states_original)
+
+        # print("inside self atten value_states 1:")
+        # print("has nans:" + str(torch.isnan(value_states).any()))
 
         if prompt_list is not None:
             pk, pv = prompt_list
+            # print("inside self atten pk 1:")
+            # print("has nans:" + str(torch.isnan(pk).any()))
+            # print("inside self atten pv 1:")
+            # print("has nans:" + str(torch.isnan(pv).any()))
             key_states = torch.cat((pk,key_states), dim=1)
             value_states = torch.cat((pv,value_states), dim=1)
 
         key_states = self._shape(key_states, -1, batch_size)
         value_states = self._shape(value_states, -1, batch_size)
 
+        # print("inside self atten key_states 2:")
+        # print("has nans:" + str(torch.isnan(value_states).any()))
+        # print("inside self atten value_states 2:")
+        # print("has nans:" + str(torch.isnan(value_states).any()))
+
         proj_shape = (batch_size * self.num_heads, -1, self.head_dim)
         query_states = self._shape(query_states, target_len, batch_size).view(*proj_shape)
         key_states = key_states.view(*proj_shape)
         value_states = value_states.view(*proj_shape)
+
+        # print("inside self atten value_states 3:")
+        # print("has nans:" + str(torch.isnan(value_states).any()))
 
         # if prompt_list:
         #     pdb.set_trace()
@@ -825,9 +857,17 @@ class DeformableDetrMultiheadAttention(nn.Module):
         else:
             attn_weights_reshaped = None
 
+        # print("inside self atten attn_weights:")
+        # print("has nans:" + str(torch.isnan(attn_weights).any()))
+
         attn_probs = nn.functional.dropout(attn_weights, p=self.dropout, training=self.training)
 
+        # print("inside self atten attn_probs:")
+        # print("has nans:" + str(torch.isnan(attn_probs).any()))
+
         attn_output = torch.bmm(attn_probs, value_states)
+        # print("inside self atten attn_output 1:")
+        # print("has nans:" + str(torch.isnan(attn_output).any()))
 
         if attn_output.size() != (batch_size * self.num_heads, target_len, self.head_dim):
             raise ValueError(
@@ -839,7 +879,13 @@ class DeformableDetrMultiheadAttention(nn.Module):
         attn_output = attn_output.transpose(1, 2)
         attn_output = attn_output.reshape(batch_size, target_len, embed_dim)
 
+        # print("inside self atten attn_output 2:")
+        # print("has nans:" + str(torch.isnan(attn_output).any()))
+
         attn_output = self.out_proj(attn_output)
+
+        # print("inside self atten attn_output 3:")
+        # print("has nans:" + str(torch.isnan(attn_output).any()))
 
         return attn_output, attn_weights_reshaped
 
@@ -992,6 +1038,10 @@ class DeformableDetrDecoderLayer(nn.Module):
         """
         residual = hidden_states
 
+        # print("pre self atten 1 hidden_states:")
+        # # print(hidden_states)
+        # print("has nans:" + str(torch.isnan(hidden_states).any()))
+
         # Self Attention
         hidden_states, self_attn_weights = self.self_attn(
             hidden_states=hidden_states,
@@ -1000,12 +1050,23 @@ class DeformableDetrDecoderLayer(nn.Module):
             prompt_list=prompt_list,
         )
 
+        # print("post self atten 1 hidden_states:")
+        # print("has nans:" + str(torch.isnan(hidden_states).any()))
+
+
         # if prompt_list:
         #     pdb.set_trace()
 
         hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
         hidden_states = residual + hidden_states
+
+        # print("pre self atten 2 hidden_states:")
+        # print("has nans:" + str(torch.isnan(hidden_states).any()))
+
         hidden_states = self.self_attn_layer_norm(hidden_states)
+
+        # print("self atten 2 hidden_states:")
+        # print("has nans:" + str(torch.isnan(hidden_states).any()))
 
         second_residual = hidden_states
 
@@ -1023,10 +1084,16 @@ class DeformableDetrDecoderLayer(nn.Module):
             output_attentions=output_attentions,
         )
 
+        # print("hidden_states 0:")
+        # print("has nans:" + str(torch.isnan(hidden_states).any()))
+
         hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
         hidden_states = second_residual + hidden_states
 
         hidden_states = self.encoder_attn_layer_norm(hidden_states)
+
+        # print("hidden_states 1:")
+        # print("has nans:" + str(torch.isnan(hidden_states).any()))
 
         # Fully Connected
         residual = hidden_states
@@ -1036,6 +1103,9 @@ class DeformableDetrDecoderLayer(nn.Module):
         hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
         hidden_states = residual + hidden_states
         hidden_states = self.final_layer_norm(hidden_states)
+
+        # print("hidden_states 2:")
+        # print("has nans:" + str(torch.isnan(hidden_states).any()))
 
         outputs = (hidden_states,)
 
@@ -1391,6 +1461,12 @@ class DeformableDetrDecoder(DeformableDetrPreTrainedModel):
             p_list = None
             if query is not None:
                 p_list, _, output = prompts.forward(query, idx, hidden_states, train=train)
+
+                # print("inside decoder p_list:")
+                # print("has nans:" + str(torch.isnan(p_list[0]).any()))
+                # if (torch.isnan(p_list[0]).any()):
+                #     print("p_list:")
+                #     print(p_list)
                 #pdb.set_trace()
 
             if self.gradient_checkpointing and self.training:
@@ -1414,6 +1490,9 @@ class DeformableDetrDecoder(DeformableDetrPreTrainedModel):
                     prompt_list=p_list,
                 )
 
+            # print("layer_outputs[0]:")
+            # print(layer_outputs[0])
+            # print("has nans:" + str(torch.isnan(layer_outputs[0]).any()))
             hidden_states = layer_outputs[0]
 
             # hack implementation for iterative bounding box refinement
@@ -1831,6 +1910,10 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
 
             return tuple_outputs
 
+        # print("decoder_outputs.last_hidden_state:")
+        # print(decoder_outputs.last_hidden_state)
+        # print("has nans:" + str(torch.isnan(decoder_outputs.last_hidden_state).any()))
+
         return DeformableDetrModelOutput(
             init_reference_points=init_reference_points,
             last_hidden_state=decoder_outputs.last_hidden_state,
@@ -1846,6 +1929,11 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             enc_outputs_coord_logits=enc_outputs_coord_logits,
         )
 
+def _get_source_permutation_idx_me(self, indices):
+        # permute predictions following indices
+        batch_idx = torch.cat([torch.full_like(source, i) for i, (source, _) in enumerate(indices)])
+        source_idx = torch.cat([source for (source, _) in indices])
+        return batch_idx, source_idx
 
 @add_start_docstrings(
     """
@@ -1894,7 +1982,8 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
         # Q: What is this? 
         prior_prob = 0.01
         bias_value = -math.log((1 - prior_prob) / prior_prob)
-        self.class_embed.bias.data = torch.ones(config.num_labels) * bias_value
+        # self.class_embed.bias.data = torch.ones(config.num_labels) * bias_value
+        nn.init.constant_(self.class_embed.bias, bias_value)
         nn.init.constant_(self.bbox_embed.layers[-1].weight.data, 0)
         nn.init.constant_(self.bbox_embed.layers[-1].bias.data, 0)
 
@@ -2020,8 +2109,23 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
             else:
                 reference = inter_references[:, level - 1]
             reference = inverse_sigmoid(reference)
+            # print("references:")
+            # print(reference)
+
             outputs_class = self.class_embed[level](hidden_states[:, level])
+
+            # Important: seems like the issue is hidden_states
+            # print("self.bbox_embed[level]:")
+            # print(self.bbox_embed[level])
+            # print("hidden_states[:, level]:")
+            # print(hidden_states[:, level])
+
+            if (torch.isnan(hidden_states[:, level]).any()):
+                pdb.set_trace()
+
             delta_bbox = self.bbox_embed[level](hidden_states[:, level])
+            # print("delta_bbox:")
+            # print(delta_bbox)
             if reference.shape[-1] == 4:
                 outputs_coord_logits = delta_bbox + reference
             elif reference.shape[-1] == 2:
@@ -2029,7 +2133,12 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
                 outputs_coord_logits = delta_bbox
             else:
                 raise ValueError(f"reference.shape[-1] should be 4 or 2, but got {reference.shape[-1]}")
+
+            # print("output class logits:")
+            # print(outputs_coord_logits)
             outputs_coord = outputs_coord_logits.sigmoid()
+            # print("outputs_coord:")
+            # print(outputs_coord)
             outputs_classes.append(outputs_class)
             outputs_coords.append(outputs_coord)
         outputs_class = torch.stack(outputs_classes)
@@ -2041,6 +2150,9 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
         loss, loss_dict, auxiliary_outputs = None, None, None
 
         # First: create the matcher
+
+        # print("Predicted boxes:")
+        # print(pred_boxes)
         
         if labels is not None:
 
@@ -2064,6 +2176,7 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
             if self.config.two_stage:
                 enc_outputs_coord = outputs.enc_outputs_coord_logits.sigmoid()
                 outputs_loss["enc_outputs"] = {"logits": outputs.enc_outputs_class, "pred_boxes": enc_outputs_coord}
+
 
             loss_dict = criterion(outputs_loss, labels)
             # Fourth: compute total loss, as a weighted sum of the various losses

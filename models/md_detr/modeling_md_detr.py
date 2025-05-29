@@ -2,6 +2,7 @@ import copy
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
 
+import math
 import torch
 from torch import Tensor, nn
 
@@ -10,10 +11,12 @@ from transformers.modeling_outputs import BaseModelOutput
 from transformers.loss.loss_for_object_detection import (
     generalized_box_iou,
     sigmoid_focal_loss,
+    _set_aux_loss,
 )
 from transformers.image_transforms import center_to_corners_format
 from transformers.loss.loss_deformable_detr import (
     DeformableDetrHungarianMatcher,
+    DeformableDetrImageLoss,
 
 )
 from transformers.models.deformable_detr.modeling_deformable_detr import (
@@ -28,8 +31,11 @@ from transformers.models.deformable_detr.modeling_deformable_detr import (
     DeformableDetrEncoder,
     DeformableDetrModelOutput,
     DeformableDetrObjectDetectionOutput,
+    DeformableDetrMLPPredictionHead,
+
     inverse_sigmoid,
     build_position_encoding,
+    _get_clones,
 )
 
 from models.prompt import Prompt
@@ -133,8 +139,7 @@ class MDDetrMultiheadAttention(DeformableDetrMultiheadAttention):
 
         return attn_output, attn_weights_reshaped
 
-    
-# TODO
+
 class MDDetrDecoderLayer(DeformableDetrDecoderLayer):
     def __init__(self, config):
         super().__init__(config)
@@ -238,7 +243,7 @@ class MDDetrDecoder(DeformableDetrDecoder):
         return_dict=None,
         *,
         query: Optional[Tensor] = None,
-        prompts=None,
+        prompts: Optional[Prompt] =None,
         train: bool = False,
         task_id=None,  # kept for API compatibility, unused here
     ):
@@ -286,7 +291,7 @@ class MDDetrDecoder(DeformableDetrDecoder):
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
-            # prompt
+            # prompt forwarding
             p_list = None
             if query is not None:
                 p_list, _, output = prompts.forward(query, idx, hidden_states, train=train)
@@ -385,6 +390,7 @@ class MDDetrModel(DeformableDetrModel):
         position_embeddings = build_position_encoding(config)
         self.backbone = DeformableDetrConvModel(backbone, position_embeddings)
 
+        # different from original Deformable DETR, we add prompt
         self.prompts = None
         if getattr(config, "use_prompts", False):
             self.prompts = Prompt(config.d_model, config.n_tasks, [config.num_prompts, config.prompt_len, 0], config.d_model, args=config)
@@ -716,7 +722,7 @@ class DeformableDetrLoss(nn.Module):
         """
 
         temp_pred_logits = outputs['logits'].clone()
-        temp_pred_logits[:,:, self.invalid_cls_logits] = -10e10
+        temp_pred_logits[:,:, self.invalid_cls_logits] = -10e10 # changes from HF
         logits = temp_pred_logits
         #logits = outputs["logits"]
         device = logits.device
@@ -829,27 +835,191 @@ class DeformableDetrLoss(nn.Module):
 
         return losses
 
+class MDDetrImageLoss(DeformableDetrImageLoss):
+    def __init__(self, matcher, num_classes, focal_alpha, losses, invalid_cls_logits):
+        super().__init__(matcher, num_classes, focal_alpha, losses)
+        self.invalid_cls_logits = invalid_cls_logits
+    
+    def _mask_logits(self, outputs):
+        masked = outputs["logits"].clone()
+        if self.invalid_cls_logits:
+            masked[:, :, list(self.invalid_cls_logits)] = -1e10
+        return {**outputs, "logits": masked}
+
+    def loss_labels(self, outputs, targets, indices, num_boxes):
+        patched = self._mask_logits(outputs)
+        return super().loss_labels(patched, targets, indices, num_boxes)
+
+    @torch.no_grad()
+    def loss_cardinality(self, outputs, targets, indices, num_boxes):
+        # mask again, then defer to HF
+        patched = self._mask_logits(outputs)
+        return super().loss_cardinality(patched, targets, indices, num_boxes) 
+
+    # Copied from transformers.loss.loss_for_object_detection.py
+    def forward(self, outputs, targets):
+        # new: k != "enc_outputs"
+        outputs_without_aux = {k: v for k, v in outputs.items() if k != "auxiliary_outputs" and k != "enc_outputs"}
+
+        # Retrieve the matching between the outputs of the last layer and the targets
+        indices = self.matcher(outputs_without_aux, targets)
+
+        # Compute the average number of target boxes across all nodes, for normalization purposes
+        num_boxes = sum(len(t["class_labels"]) for t in targets)
+        num_boxes = torch.as_tensor([num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device)
+        world_size = 1
+        # if is_accelerate_available():
+        #     if PartialState._shared_state != {}:
+        #         num_boxes = reduce(num_boxes)
+        #         world_size = PartialState().num_processes
+        num_boxes = torch.clamp(num_boxes / world_size, min=1).item()
+
+        # Compute all the requested losses
+        losses = {}
+        for loss in self.losses:
+            losses.update(self.get_loss(loss, outputs, targets, indices, num_boxes))
+
+        # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
+        if "auxiliary_outputs" in outputs:
+            for i, auxiliary_outputs in enumerate(outputs["auxiliary_outputs"]):
+                indices = self.matcher(auxiliary_outputs, targets)
+                for loss in self.losses:
+                    if loss == "masks":
+                        # Intermediate masks losses are too costly to compute, we ignore them.
+                        continue
+                    l_dict = self.get_loss(loss, auxiliary_outputs, targets, indices, num_boxes)
+                    l_dict = {k + f"_{i}": v for k, v in l_dict.items()}
+                    losses.update(l_dict)
+
+        ## new:
+        if "enc_outputs" in outputs:
+            enc_outputs = outputs["enc_outputs"]
+            bin_targets = copy.deepcopy(targets)
+            for bt in bin_targets:
+                bt["labels"] = torch.zeros_like(bt["labels"])
+            indices = self.matcher(enc_outputs, bin_targets)
+            for loss in self.losses:
+                l_dict = self.get_loss(loss, enc_outputs, bin_targets, indices, num_boxes)
+                l_dict = {k + "_enc": v for k, v in l_dict.items()}
+                losses.update(l_dict)
+
+
+        return losses
+
+def MDDetrForObjectDetectionLoss(
+    logits,
+    labels,
+    device,
+    pred_boxes,
+    config,
+    outputs,
+    outputs_class=None,
+    outputs_coord=None,
+):
+    matcher = DeformableDetrHungarianMatcher(
+        class_cost=config.class_cost,
+        bbox_cost=config.bbox_cost,
+        giou_cost=config.giou_cost,
+    )
+
+    losses = ["labels", "boxes", "cardinality"]
+    criterion = MDDetrImageLoss(
+        matcher=matcher,
+        num_classes=config.num_labels,
+        focal_alpha=config.focal_alpha,
+        losses=losses,
+        invalid_cls_logits=getattr(config, "invalid_cls_logits", []),
+    )
+    criterion.to(device)
+
+    outputs_loss = {"logits": logits, "pred_boxes": pred_boxes}
+    auxiliary_outputs = None
+    if config.auxiliary_loss:
+        auxiliary_outputs = _set_aux_loss(
+            outputs_class, outputs_coord
+        )
+        outputs_loss["auxiliary_outputs"] = auxiliary_outputs
+    if config.two_stage:
+        enc_coord = outputs.enc_outputs_coord_logits.sigmoid()
+        outputs_loss["enc_outputs"] = {
+            "logits": outputs.enc_outputs_class,
+            "pred_boxes": enc_coord,
+        }
+
+    loss_dict = criterion(outputs_loss, labels)
+    # Fourth: compute total loss, as a weighted sum of the various losses
+    weight_dict = {"loss_ce": 1, "loss_bbox": config.bbox_loss_coefficient}
+    weight_dict["loss_giou"] = config.giou_loss_coefficient
+    if config.auxiliary_loss:
+        aux_weight_dict = {}
+        for i in range(config.decoder_layers - 1):
+            aux_weight_dict.update({k + f"_{i}": v for k, v in weight_dict.items()})
+        weight_dict.update(aux_weight_dict)
+    loss = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
+    return loss, loss_dict, auxiliary_outputs
+
 class MDDetrForObjectDetection(DeformableDetrForObjectDetection):
     config_class = MDDetrConfig
     base_model_prefix = "md_detr"
 
     def __init__(self, config: MDDetrConfig, default=True, log_file=None, *args, **kwargs):
-        super().__init__(config)
+        super(DeformableDetrForObjectDetection, self).__init__(config)
         self.model = MDDetrModel(config)  
 
+        # configure matcher (from old md_detr)
         self.matcher = DeformableDetrHungarianMatcher(
                 class_cost=config.class_cost, bbox_cost=config.bbox_cost, giou_cost=config.giou_cost
             )
-
         if not default:
             prev_intro_cls = config.PREV_INTRODUCED_CLS
             curr_intro_cls = config.CUR_INTRODUCED_CLS
             seen_classes = prev_intro_cls + curr_intro_cls
             self.invalid_cls_logits = list(range(seen_classes, config.num_labels)) #unknown class indx will not be included in the invalid class range
-
             print("Invalid class rangw: " + str(self.invalid_cls_logits), file=log_file)
         else:
             self.invalid_cls_logits = None
+
+        # Detection heads on top
+        self.class_embed = nn.Linear(config.d_model, config.num_labels)
+        self.bbox_embed = DeformableDetrMLPPredictionHead(
+            input_dim=config.d_model,
+            hidden_dim=config.d_model,
+            output_dim=4,
+            num_layers=3,
+        )
+
+        # special initialization from old md_detr
+        prior_prob = 0.01
+        bias_value = -math.log((1 - prior_prob) / prior_prob)
+        # self.class_embed.bias.data = torch.ones(config.num_labels) * bias_value
+        nn.init.constant_(self.class_embed.bias, bias_value)
+        nn.init.constant_(self.bbox_embed.layers[-1].weight.data, 0)
+        nn.init.constant_(self.bbox_embed.layers[-1].bias.data, 0)
+
+        # if two-stage, the last class_embed and bbox_embed is for region proposal generation
+        num_pred = (config.decoder_layers + 1) if config.two_stage else config.decoder_layers
+        if config.with_box_refine:
+            self.class_embed = _get_clones(self.class_embed, num_pred)
+            self.bbox_embed = _get_clones(self.bbox_embed, num_pred)
+            nn.init.constant_(self.bbox_embed[0].layers[-1].bias.data[2:], -2.0) # from old md_detr
+            # hack implementation for iterative bounding box refinement
+            self.model.decoder.bbox_embed = self.bbox_embed
+        else:
+            nn.init.constant_(self.bbox_embed.layers[-1].bias.data[2:], -2.0) # from old md_detr
+            self.class_embed = nn.ModuleList([self.class_embed for _ in range(num_pred)])
+            self.bbox_embed = nn.ModuleList([self.bbox_embed for _ in range(num_pred)])
+            self.model.decoder.bbox_embed = None
+        if config.two_stage:
+            # hack implementation for two-stage
+            self.model.decoder.class_embed = self.class_embed
+
+            # from old md_detr
+            for box_embed in self.bbox_embed:
+                nn.init.constant_(box_embed.layers[-1].bias.data[2:], 0.0)
+
+        self.loss_function = MDDetrForObjectDetectionLoss
+        # Initialize weights and apply final processing
+        self.post_init()
 
     def forward(
         self,
@@ -921,41 +1091,55 @@ class MDDetrForObjectDetection(DeformableDetrForObjectDetection):
         loss, loss_dict, auxiliary_outputs = None, None, None
         
         # start of change
-        if labels is not None:
+        # if labels is not None:
 
-            # Second: create the criterion
-            losses = ["labels", "boxes", "cardinality"]
-            criterion = DeformableDetrLoss(
-                matcher=self.matcher,
-                num_classes=self.config.num_labels,
-                focal_alpha=self.config.focal_alpha,
-                losses=losses,
-                invalid_cls_logits=self.invalid_cls_logits
-            )
-            criterion.to(self.device)
-            # Third: compute the losses, based on outputs and labels
-            outputs_loss = {}
-            outputs_loss["logits"] = logits
-            outputs_loss["pred_boxes"] = pred_boxes
-            if self.config.auxiliary_loss:
-                auxiliary_outputs = self._set_aux_loss(outputs_class, outputs_coord)
-                outputs_loss["auxiliary_outputs"] = auxiliary_outputs
-            if self.config.two_stage:
-                enc_outputs_coord = outputs.enc_outputs_coord_logits.sigmoid()
-                outputs_loss["enc_outputs"] = {"logits": outputs.enc_outputs_class, "pred_boxes": enc_outputs_coord}
+            # # Second: create the criterion
+            # losses = ["labels", "boxes", "cardinality"]
+            # criterion = MDDetrImageLoss(
+            #     matcher=self.matcher,
+            #     num_classes=self.config.num_labels,
+            #     focal_alpha=self.config.focal_alpha,
+            #     losses=losses,
+            #     invalid_cls_logits=self.invalid_cls_logits
+            # )
+            # criterion.to(self.device)
+            # # Third: compute the losses, based on outputs and labels
+            # outputs_loss = {}
+            # outputs_loss["logits"] = logits
+            # outputs_loss["pred_boxes"] = pred_boxes
+            # if self.config.auxiliary_loss:
+            #     auxiliary_outputs = self._set_aux_loss(outputs_class, outputs_coord)
+            #     outputs_loss["auxiliary_outputs"] = auxiliary_outputs
+            # if self.config.two_stage:
+            #     enc_outputs_coord = outputs.enc_outputs_coord_logits.sigmoid()
+            #     outputs_loss["enc_outputs"] = {"logits": outputs.enc_outputs_class, "pred_boxes": enc_outputs_coord}
 
-            loss_dict = criterion(outputs_loss, labels)
-            # Fourth: compute total loss, as a weighted sum of the various losses
-            weight_dict = {"loss_ce": 1, "loss_bbox": self.config.bbox_loss_coefficient}
-            weight_dict["loss_giou"] = self.config.giou_loss_coefficient
-            if self.config.auxiliary_loss:
-                aux_weight_dict = {}
-                for i in range(self.config.decoder_layers - 1):
-                    aux_weight_dict.update({k + f"_{i}": v for k, v in weight_dict.items()})
-                weight_dict.update(aux_weight_dict)
-            loss = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
+            # loss_dict = criterion(outputs_loss, labels)
+            # # Fourth: compute total loss, as a weighted sum of the various losses
+            # weight_dict = {"loss_ce": 1, "loss_bbox": self.config.bbox_loss_coefficient}
+            # weight_dict["loss_giou"] = self.config.giou_loss_coefficient
+            # if self.config.auxiliary_loss:
+            #     aux_weight_dict = {}
+            #     for i in range(self.config.decoder_layers - 1):
+            #         aux_weight_dict.update({k + f"_{i}": v for k, v in weight_dict.items()})
+            #     weight_dict.update(aux_weight_dict)
+            # loss = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
 
         # end of change 
+
+        # new transformer
+        if labels is not None:
+            loss, loss_dict, auxiliary_outputs = self.loss_function(
+                logits,
+                labels,
+                self.device,
+                pred_boxes,
+                self.config,
+                outputs,
+                outputs_class,
+                outputs_coord,
+            )
+        
  
         if not return_dict:
             if auxiliary_outputs is not None:

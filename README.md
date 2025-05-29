@@ -95,7 +95,7 @@ bash launch.sh -e config/experiement/train_with_promt.env -p config/sbatch/train
 
 Directly run:
 ```bash
-EXP=/h/stevev/MD-DETR/config/experiement/train_with_no_promt.env
+EXP=/h/stevev/MD-DETR/config/experiement/train_with_promt.env
 export EXPERIMENT_CONFIG=$EXP
 source config/global.env
 bash run_mm.sh

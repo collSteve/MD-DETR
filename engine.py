@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from datasets.coco_hug import CocoDetection, task_info_coco, create_task_json
 from models.image_processing_deformable_detr import DeformableDetrImageProcessor 
 from models.configuration_deformable_detr import DeformableDetrConfig
+from models.md_detr.configuration_md_detr import MDDetrConfig
 from models.modeling_deformable_detr import DeformableDetrForObjectDetection
 from models.md_detr.modeling_md_detr import MDDetrForObjectDetection
 
@@ -38,12 +39,12 @@ class local_trainer(pl.LightningModule):
 		self.invalid_cls_logits = list(range(seen_classes, args.n_classes-1)) #unknown class indx will not be included in the invalid class range
 
 		if args.repo_name:
-			self.model =  MDDetrForObjectDetection.from_pretrained(args.repo_name,config=detr_config,
+			self.model =  DeformableDetrForObjectDetection.from_pretrained(args.repo_name,config=detr_config,
 																	ignore_mismatched_sizes=True,
 																	default=not(args.mask_gradients), log_file=args.log_file)
 			self.processor = DeformableDetrImageProcessor.from_pretrained(args.repo_name)
 		else:
-			self.model = MDDetrForObjectDetection(detr_config, default=not(args.mask_gradients),
+			self.model = DeformableDetrForObjectDetection(detr_config, default=not(args.mask_gradients),
 												 log_file=args.log_file)
 			
 			self.processor = DeformableDetrImageProcessor()
@@ -121,7 +122,8 @@ class local_trainer(pl.LightningModule):
 			query = None
 		
 		# BG thresholding on previously seen classes
-		if self.args.bg_thres and not return_outputs:
+		if self.args.bg_thres and not return_outputs and self.args.use_prompts:
+		# if self.args.bg_thres and not return_outputs:
 			labels = self.BG_thresholding(results=results, labels=labels)
 
 		outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels, query=query, train=True, task_id=self.task_id)
@@ -130,6 +132,7 @@ class local_trainer(pl.LightningModule):
 		loss_dict = outputs.loss_dict
 
 		if self.args.local_query and self.args.use_prompts:
+		# if self.args.local_query:
 			loss_dict['query_loss'] = query_loss
 
 			loss += self.args.lambda_query * query_loss
