@@ -34,9 +34,9 @@ class Prompt(nn.Module):
             p = tensor_prompt(self.e_pool_size, e_l, emb_d)
             k = tensor_prompt(self.e_pool_size, self.key_d)
             a = tensor_prompt(self.e_pool_size, self.key_d)
-            p = self.gram_schmidt(p)
-            k = self.gram_schmidt(k)
-            a = self.gram_schmidt(a)
+            # p = self.gram_schmidt(p)
+            # k = self.gram_schmidt(k)
+            # a = self.gram_schmidt(a)
             # setattr(self, f'e_p_{e}',p)
             # setattr(self, f'e_k_{e}',k)
             # setattr(self, f'e_a_{e}',a)
@@ -196,13 +196,16 @@ class Prompt(nn.Module):
             Ek = P_[:,:i,:]
             Ev = P_[:,i:,:]
 
+            # print("self.ortho_mu: " + str(self.ortho_mu) + "/n")
+
             # ortho penalty # ortho_mu = 0
-            if train and self.ortho_mu > 0:
-                loss = ortho_penalty(K) * self.ortho_mu
-                loss += ortho_penalty(A) * self.ortho_mu
-                loss += ortho_penalty(p.view(p.shape[0], -1)) * self.ortho_mu
-            else:
-                loss = 0
+            loss = 0
+            # if train and self.ortho_mu > 0:
+            #     loss = ortho_penalty(K) * self.ortho_mu
+            #     loss += ortho_penalty(A) * self.ortho_mu
+            #     loss += ortho_penalty(p.view(p.shape[0], -1)) * self.ortho_mu
+            # else:
+            #     loss = 0
         else:
             loss = 0
 
