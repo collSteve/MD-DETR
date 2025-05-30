@@ -19,6 +19,13 @@ from models.md_detr.configuration_md_detr import MDDetrConfig
 from models.modeling_deformable_detr import DeformableDetrForObjectDetection
 from models.md_detr.modeling_md_detr import MDDetrForObjectDetection
 
+def find_param_nans(model):
+    for name, p in model.named_parameters():
+        if torch.isnan(p).any():
+            cnt = torch.isnan(p).sum().item()
+            print(f"[INIT] {name}: {cnt} NaNs")
+
+
 class local_trainer(pl.LightningModule):
 	def __init__(self, train_loader, val_loader, test_dataset, args, local_evaluator, task_id, eval_mode=False):
 		super().__init__()
@@ -48,6 +55,11 @@ class local_trainer(pl.LightningModule):
 												 log_file=args.log_file)
 			
 			self.processor = DeformableDetrImageProcessor()
+
+		if self.model.model.prompts:
+			self.model.model.prompts.reset_parameters()
+
+		find_param_nans(self.model)
 		
 		self.task_id = task_id
 		self.lr = args.lr
