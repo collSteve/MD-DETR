@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import torch
 import torch.nn as nn
 import pdb
@@ -8,15 +9,23 @@ adapted from: https://github.com/GT-RIPL/CODA-Prompt
 '''
 import pdb
 
+@dataclass(frozen=True, slots=True)
+class PromptParam:
+    e_pool_size: int        # number of memory units
+    e_p_length: int         # memory length
+    ortho_mu: float = 0.0 
+
 
 class Prompt(nn.Module):
-    def __init__(self, emb_d, n_tasks, prompt_param, key_dim=768, args=None):
+    def __init__(self, emb_d, n_tasks, prompt_param: PromptParam, key_dim=768, args=None):
         super().__init__()
         self.task_count = 0
         self.emb_d = emb_d
         self.key_d = key_dim
         self.n_tasks = n_tasks
         self._init_smart(emb_d, prompt_param)
+
+        print(f"emb_d={emb_d}, key_d={key_dim},e_pool_size={self.e_pool_size}, e_p_length={self.e_p_length}")
 
         if args.local_query:
             #self.alpha = nn.Parameter(torch.rand(1,300,1), requires_grad=True)
@@ -34,31 +43,30 @@ class Prompt(nn.Module):
             p = tensor_prompt(self.e_pool_size, e_l, emb_d)
             k = tensor_prompt(self.e_pool_size, self.key_d)
             a = tensor_prompt(self.e_pool_size, self.key_d)
-            # p = self.gram_schmidt(p)
-            # k = self.gram_schmidt(k)
-            # a = self.gram_schmidt(a)
-            # setattr(self, f'e_p_{e}',p)
-            # setattr(self, f'e_k_{e}',k)
-            # setattr(self, f'e_a_{e}',a)
+
             str_e = str(e)
             self.e_p[str_e] = nn.Parameter(p)
             self.e_k[str_e] = nn.Parameter(k)
             self.e_a[str_e] = nn.Parameter(a)
 
-            # if (torch.isnan(a).any() or torch.isnan(k).any() or torch.isnan(p).any()):
-            #     pdb.set_trace()
 
-        # pdb.set_trace()
+    def reset_parameters(self):
+        for p in self.e_p.values():
+            nn.init.uniform_(p)
+        for p in self.e_k.values():
+            nn.init.uniform_(p)
+        for p in self.e_a.values():
+            nn.init.uniform_(p)
 
-    def _init_smart(self, emb_d, prompt_param):
+    def _init_smart(self, emb_d, prompt_param: PromptParam):
 
         # prompt basic param
-        self.e_pool_size = int(prompt_param[0])
-        self.e_p_length = int(prompt_param[1])
+        self.e_pool_size = int(prompt_param.e_pool_size)
+        self.e_p_length = int(prompt_param.e_p_length)
         self.e_layers = [0,1,2,3,4,5]
 
         # strenth of ortho penalty
-        self.ortho_mu = prompt_param[2]
+        self.ortho_mu = prompt_param.ortho_mu
         
     def set_task_id(self, task_id=0):
         self.task_count = task_id
@@ -125,11 +133,10 @@ class Prompt(nn.Module):
 
     # Q: what is x block?
     def forward(self, x_querry, l, x_block, train=False, task_id=None):
-
         # e prompts
         if len(x_querry.shape) !=2:
             #print('yes')
-            query_wt = self.query_tf(x_querry.view(x_querry.shape[0],-1))
+            query_wt = self.query_tf(x_querry.view(x_querry.shape[0],-1)) # why learn it here instead of directly learn Q -> K by A
             x_querry = x_querry * query_wt.unsqueeze(-1)
             x_querry = x_querry.sum(dim=1)
 
@@ -137,12 +144,6 @@ class Prompt(nn.Module):
         if l in self.e_layers:
             e_valid = True
             B, C = x_querry.shape
-
-            # pdb.set_trace()
-
-            # K = getattr(self,f'e_k_{l}')
-            # A = getattr(self,f'e_a_{l}')
-            # p = getattr(self,f'e_p_{l}')
 
             K = self.e_k[str(l)]
             A = self.e_a[str(l)]
@@ -170,23 +171,15 @@ class Prompt(nn.Module):
             # with attention and cosine sim
             # (b x 1 x d) * soft([1 x k x d]) = (b x k x d) -> attention = k x d
             a_querry = torch.einsum('bd,kd->bkd', x_querry, A)
+
             # # (b x k x d) - [1 x k x d] = (b x k) -> key = k x d
             n_K = nn.functional.normalize(K, dim=1)
 
-            # print("inside prompt a_querry:")
-            # print("has nans:" + str(torch.isnan(a_querry).any()))
-            # print("inside prompt n_K:")
-            # print("has nans:" + str(torch.isnan(n_K).any()))
-            if (torch.isnan(a_querry).any() or torch.isnan(n_K).any()):
-                pdb.set_trace()
-
             q = nn.functional.normalize(a_querry, dim=2)
             aq_k = torch.einsum('bkd,kd->bk', q, n_K)
+
             # (b x 1 x k x 1) * [1 x plen x k x d] = (b x plen x d) -> prompt = plen x k x d
             P_ = torch.einsum('bk,kld->bld', aq_k, p)
-
-            # print("inside prompt P_:")
-            # print("has nans:" + str(torch.isnan(P_).any()))
 
             if (torch.isnan(P_).any()):
                 pdb.set_trace()
@@ -196,16 +189,7 @@ class Prompt(nn.Module):
             Ek = P_[:,:i,:]
             Ev = P_[:,i:,:]
 
-            # print("self.ortho_mu: " + str(self.ortho_mu) + "/n")
-
-            # ortho penalty # ortho_mu = 0
             loss = 0
-            # if train and self.ortho_mu > 0:
-            #     loss = ortho_penalty(K) * self.ortho_mu
-            #     loss += ortho_penalty(A) * self.ortho_mu
-            #     loss += ortho_penalty(p.view(p.shape[0], -1)) * self.ortho_mu
-            # else:
-            #     loss = 0
         else:
             loss = 0
 
