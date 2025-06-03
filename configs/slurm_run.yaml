@@ -1,0 +1,2 @@
+defaults:
+  - patch/slurm_overrides

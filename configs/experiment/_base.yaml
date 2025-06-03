@@ -1,0 +1,25 @@
+# ------------------------------------------------
+# Shared defaults for every MD-DETR experiment
+# ------------------------------------------------
+use_prompts:          0        # overwritten in *with_prompt* variants
+num_prompts:         100
+plen:                 10
+
+split_point:           0
+n_tasks:               4
+
+checkpoint_dir:      /h/stevev/MD_DETR_runs/upload/checkpoints/Task_1
+checkpoint_base:     checkpoint10.pth
+checkpoint_next:     checkpoint05.pth
+
+lr:                  1e-4
+lr_old:              1e-5
+
+bg_thres:            0.65
+bg_thres_topk:       5
+lambda_query:        0.1
+
+repo_name:           SenseTime/deformable-detr
+freeze:              backbone,encoder,decoder
+new_params:          class_embed,prompts
+viz:                 --viz

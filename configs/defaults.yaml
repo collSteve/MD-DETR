@@ -1,0 +1,5 @@
+defaults:
+  - experiment: train_with_prompt
+  - sbatch: local_1gpu
+  - shared: default
+  # - override hydra/launcher: basic

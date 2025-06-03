@@ -97,6 +97,11 @@ Directly run:
 ```bash
 EXP=/h/stevev/MD-DETR/config/experiement/train_with_promt.env
 export EXPERIMENT_CONFIG=$EXP
+
+export EXPERIMENT_CONFIG=/h/stevev/MD-DETR/config/experiement/train_with_prompt.yaml
 source config/global.env
 bash run_mm.sh
+
+python run.py -m sbatch=train_sbatch hydra/launcher=slurm hydra.verbose=true
+
 ```
