@@ -10,7 +10,7 @@ def main(cfg: DictConfig):
 
     # -------- build CLI --------
     common = [
-        "--output_dir", str(out_dir),
+        "--output_dir",    str(out_dir),
         "--train_img_dir", cfg.shared.train_dir,
         "--test_img_dir",  cfg.shared.val_dir,
         "--task_ann_dir",  f"{cfg.shared.task_ann_root}/{cfg.experiment.split_point}",
@@ -68,13 +68,15 @@ def main(cfg: DictConfig):
         "main.py",
     ] + common + mode
 
-    if os.environ.get("HYDRA_LAUNCHED_BY_SUBMITIT") == "1":
-        # we're inside the compute node / srun step
+    is_submitit_worker = os.environ.get("SUBMITIT_EXECUTOR") == "slurm"
+
+    if is_submitit_worker or cfg.run.local:
+        # we are on the compute node → launch the experiment
         print(" ".join(shlex.quote(x) for x in torchrun))
         subprocess.check_call(torchrun)
     else:
-        # we're in the driver process on the login node
-        print("[submitit] Job script generated, submitted to Slurm.")
+        # we are on the login / driver process
+        print("[submitit] Job script generated and submitted to Slurm.")
 
 if __name__ == "__main__":
     main()

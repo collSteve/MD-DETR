@@ -102,6 +102,19 @@ export EXPERIMENT_CONFIG=/h/stevev/MD-DETR/config/experiement/train_with_prompt.
 source config/global.env
 bash run_mm.sh
 
+nohup python run.py -m sbatch=train_sbatch hydra/launcher=slurm hydra.verbose=true
+
+python run.py -m sbatch=validate_sbatch hydra/launcher=slurm experiment=validate_with_prompt
+
 python run.py -m sbatch=train_sbatch hydra/launcher=slurm hydra.verbose=true
 
+python run.py run.local=true experiment=validate_with_prompt
+
+nohup python run.py -m sbatch=train_sbatch hydra/launcher=slurm &> outputs/submit.log &
+```
+
+```python
+visualize_weights_by_class_aggregated_advanced(p, save_path="/h/stevev/MD_DETR_runs/validate_with_prompt_hydra_3/t1_class.png", limit_classes=[0,1,2,3,4], line_visual=["mean"], area_visual=["std"], alpha=0.3)
+
+visualize_weights_by_class_aggregated_advanced(p, save_path="/h/stevev/MD_DETR_runs/validate_with_prompt_hydra_3/t2_5_class.png", limit_classes=list(range(0, 39, 5)), line_visual=["mean"], area_visual=["std"], alpha=0.3)
 ```

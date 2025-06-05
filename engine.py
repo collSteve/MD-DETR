@@ -104,6 +104,8 @@ class local_trainer(pl.LightningModule):
 		pixel_values = batch["pixel_values"].to(self.device)
 		pixel_mask = batch["pixel_mask"].to(self.device)
 		labels = [{k: v.to(self.device) for k, v in t.items()} for t in batch["labels"]]
+
+		# print(f"Labels: {labels}")
 		orig_target_sizes = torch.stack([target["orig_size"] for target in labels], dim=0)
 		
 		if self.args.use_prompts:

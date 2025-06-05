@@ -1,26 +1,29 @@
-
 defaults:
   - submitit_slurm
 
-partition:        ${sbatch.partition}
-qos:              ${sbatch.qos}
-nodes:            ${sbatch.nodes}
-gpus_per_node:    ${sbatch.gpus_per_node}
-gres:             gpu:${sbatch.gpus_per_node}
-cpus_per_task:    ${sbatch.cpus_per_task}
-mem_gb:              ${sbatch.mem_per_node_gb}
-timeout_min:             ${sbatch.time_min}
-name:             ${experiment.exp_name}
-tasks_per_node:  1
+name: ${experiment.exp_name}
 
-# mem_gb:           64                          # 64  → --mem=64G
-# timeout_min:      120
+partition: ${sbatch.partition}
+qos: ${sbatch.qos}
+nodes: ${sbatch.nodes}
+gpus_per_node: ${sbatch.gpus_per_node}
+gres: gpu:${sbatch.gpus_per_node}
+cpus_per_task: ${sbatch.cpus_per_task}
+mem_gb: ${sbatch.mem_per_node_gb}
+timeout_min: ${sbatch.time_min}
+tasks_per_node: ${sbatch.gpus_per_node}
+
+# srun_args:
+#   - "--output=${shared.base_run_dir}/${experiment.exp_name}/logs/%x_%j.out"
+#   - "--error=${shared.base_run_dir}/${experiment.exp_name}/logs/%x_%j.err"
+
 
 setup:
   - "source /scratch/ssd004/scratch/stevev/miniconda3/etc/profile.d/conda.sh"
   - "conda activate MD-DETR"
 
-submitit_folder:  ${shared.base_run_dir}/${experiment.exp_name}/logs
+submitit_folder: ${shared.base_run_dir}/${experiment.exp_name}/logs
 additional_parameters:
   output: ${shared.base_run_dir}/${experiment.exp_name}/logs/%x_%j.out
-  error:  ${shared.base_run_dir}/${experiment.exp_name}/logs/%x_%j.err
+  error: ${shared.base_run_dir}/${experiment.exp_name}/logs/%x_%j.err
+
