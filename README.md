@@ -76,3 +76,27 @@ If you find this repo useful, please cite:
   year={2024}
 }
 ```
+
+
+## New Run:
+Run slurm schduler:
+```bash
+bash launch.sh -e config/experiement/validate_with_no_prompt.env -p config/sbatch/validate.sbatch.env
+```
+```bash
+bash launch.sh -e config/experiement/validate_with_prompt.env -p config/sbatch/validate.sbatch.env
+```
+```bash
+bash launch.sh -e config/experiement/train_with_no_promt.env -p config/sbatch/train.sbatch.env
+```
+```bash
+bash launch.sh -e config/experiement/train_with_promt.env -p config/sbatch/train.sbatch.env
+```
+
+Directly run:
+```bash
+EXP=/h/stevev/MD-DETR/config/experiement/train_with_promt.env
+export EXPERIMENT_CONFIG=$EXP
+source config/global.env
+bash run_mm.sh
+```

@@ -27,7 +27,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
-from .prompt import Prompt
+from .prompt import Prompt, PromptParam
 
 from transformers.activations import ACT2FN
 from transformers.file_utils import (
@@ -709,6 +709,7 @@ class DeformableDetrMultiscaleDeformableAttention(nn.Module):
             except Exception:
                 # PyTorch implementation
                 output = multi_scale_deformable_attention(value, spatial_shapes, sampling_locations, attention_weights)
+        
         output = self.output_proj(output)
 
         return output, attention_weights
@@ -771,6 +772,7 @@ class DeformableDetrMultiheadAttention(nn.Module):
         query_states = self.q_proj(hidden_states) * self.scaling
 
         key_states = self.k_proj(hidden_states)
+
         value_states = self.v_proj(hidden_states_original)
 
         if prompt_list is not None:
@@ -785,9 +787,6 @@ class DeformableDetrMultiheadAttention(nn.Module):
         query_states = self._shape(query_states, target_len, batch_size).view(*proj_shape)
         key_states = key_states.view(*proj_shape)
         value_states = value_states.view(*proj_shape)
-
-        # if prompt_list:
-        #     pdb.set_trace()
 
         source_len = key_states.size(1)
 
@@ -1000,11 +999,9 @@ class DeformableDetrDecoderLayer(nn.Module):
             prompt_list=prompt_list,
         )
 
-        # if prompt_list:
-        #     pdb.set_trace()
-
         hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
         hidden_states = residual + hidden_states
+
         hidden_states = self.self_attn_layer_norm(hidden_states)
 
         second_residual = hidden_states
@@ -1391,7 +1388,7 @@ class DeformableDetrDecoder(DeformableDetrPreTrainedModel):
             p_list = None
             if query is not None:
                 p_list, _, output = prompts.forward(query, idx, hidden_states, train=train)
-                #pdb.set_trace()
+
 
             if self.gradient_checkpointing and self.training:
                 layer_outputs = self._gradient_checkpointing_func(
@@ -1490,7 +1487,9 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
 
         if config.use_prompts:
             self.prompts = Prompt(emb_d=config.d_model, n_tasks=config.n_tasks, 
-                                     prompt_param=[config.num_prompts,config.prompt_len,0],
+                                    prompt_param=PromptParam(e_pool_size=config.num_prompts,
+                                                            e_p_length=config.prompt_len),
+                                    #  prompt_param=[config.num_prompts,config.prompt_len,0],
                                      key_dim=config.d_model, args=config)
 
         # Create input projection layers
@@ -1846,6 +1845,11 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             enc_outputs_coord_logits=enc_outputs_coord_logits,
         )
 
+def _get_source_permutation_idx_me(self, indices):
+        # permute predictions following indices
+        batch_idx = torch.cat([torch.full_like(source, i) for i, (source, _) in enumerate(indices)])
+        source_idx = torch.cat([source for (source, _) in indices])
+        return batch_idx, source_idx
 
 @add_start_docstrings(
     """
@@ -1869,6 +1873,8 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
         # print(config.num_labels)
 
         self.model = DeformableDetrModel(config)
+
+        # Q: why is this here?
         self.matcher = DeformableDetrHungarianMatcher(
                 class_cost=config.class_cost, bbox_cost=config.bbox_cost, giou_cost=config.giou_cost
             )
@@ -1889,9 +1895,11 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
             input_dim=config.d_model, hidden_dim=config.d_model, output_dim=4, num_layers=3
         )
 
+        # Q: What is this? 
         prior_prob = 0.01
         bias_value = -math.log((1 - prior_prob) / prior_prob)
-        self.class_embed.bias.data = torch.ones(config.num_labels) * bias_value
+        # self.class_embed.bias.data = torch.ones(config.num_labels) * bias_value
+        nn.init.constant_(self.class_embed.bias, bias_value)
         nn.init.constant_(self.bbox_embed.layers[-1].weight.data, 0)
         nn.init.constant_(self.bbox_embed.layers[-1].bias.data, 0)
 
@@ -2017,7 +2025,12 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
             else:
                 reference = inter_references[:, level - 1]
             reference = inverse_sigmoid(reference)
+
             outputs_class = self.class_embed[level](hidden_states[:, level])
+
+            if (torch.isnan(hidden_states[:, level]).any()):
+                pdb.set_trace()
+
             delta_bbox = self.bbox_embed[level](hidden_states[:, level])
             if reference.shape[-1] == 4:
                 outputs_coord_logits = delta_bbox + reference
@@ -2026,7 +2039,9 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
                 outputs_coord_logits = delta_bbox
             else:
                 raise ValueError(f"reference.shape[-1] should be 4 or 2, but got {reference.shape[-1]}")
+
             outputs_coord = outputs_coord_logits.sigmoid()
+
             outputs_classes.append(outputs_class)
             outputs_coords.append(outputs_coord)
         outputs_class = torch.stack(outputs_classes)
@@ -2038,7 +2053,6 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
         loss, loss_dict, auxiliary_outputs = None, None, None
 
         # First: create the matcher
-        
         if labels is not None:
 
             # Second: create the criterion
@@ -2061,6 +2075,7 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
             if self.config.two_stage:
                 enc_outputs_coord = outputs.enc_outputs_coord_logits.sigmoid()
                 outputs_loss["enc_outputs"] = {"logits": outputs.enc_outputs_class, "pred_boxes": enc_outputs_coord}
+
 
             loss_dict = criterion(outputs_loss, labels)
             # Fourth: compute total loss, as a weighted sum of the various losses

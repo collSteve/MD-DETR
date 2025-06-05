@@ -15,7 +15,16 @@ import torch.nn.functional as F
 from datasets.coco_hug import CocoDetection, task_info_coco, create_task_json
 from models.image_processing_deformable_detr import DeformableDetrImageProcessor 
 from models.configuration_deformable_detr import DeformableDetrConfig
+from models.md_detr.configuration_md_detr import MDDetrConfig
 from models.modeling_deformable_detr import DeformableDetrForObjectDetection
+from models.md_detr.modeling_md_detr import MDDetrForObjectDetection
+
+def find_param_nans(model):
+    for name, p in model.named_parameters():
+        if torch.isnan(p).any():
+            cnt = torch.isnan(p).sum().item()
+            print(f"[INIT] {name}: {cnt} NaNs")
+
 
 class local_trainer(pl.LightningModule):
 	def __init__(self, train_loader, val_loader, test_dataset, args, local_evaluator, task_id, eval_mode=False):
@@ -46,6 +55,11 @@ class local_trainer(pl.LightningModule):
 												 log_file=args.log_file)
 			
 			self.processor = DeformableDetrImageProcessor()
+
+		if self.model.model.prompts:
+			self.model.model.prompts.reset_parameters()
+
+		find_param_nans(self.model)
 		
 		self.task_id = task_id
 		self.lr = args.lr
@@ -120,7 +134,8 @@ class local_trainer(pl.LightningModule):
 			query = None
 		
 		# BG thresholding on previously seen classes
-		if self.args.bg_thres and not return_outputs:
+		if self.args.bg_thres and not return_outputs and self.args.use_prompts:
+		# if self.args.bg_thres and not return_outputs:
 			labels = self.BG_thresholding(results=results, labels=labels)
 
 		outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels, query=query, train=True, task_id=self.task_id)
@@ -128,7 +143,8 @@ class local_trainer(pl.LightningModule):
 		loss = outputs.loss
 		loss_dict = outputs.loss_dict
 
-		if self.args.local_query:
+		if self.args.local_query and self.args.use_prompts:
+		# if self.args.local_query:
 			loss_dict['query_loss'] = query_loss
 
 			loss += self.args.lambda_query * query_loss
