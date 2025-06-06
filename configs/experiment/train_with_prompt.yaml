@@ -6,7 +6,7 @@ train:           1
 
 use_prompts:     1 
 
-batch_size:      4
+batch_size:      2
 epochs:          6
 save_epochs:     1
 eval_epochs:     1
