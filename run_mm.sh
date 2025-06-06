@@ -6,6 +6,7 @@ source config/global.env
 EXPERIMENT_CONFIG=${EXPERIMENT_CONFIG:?export EXPERIMENT_CONFIG=config/experiement/*.env}
 source "$EXPERIMENT_CONFIG"
 
+
 # ---------- 2. derived paths ----------
 EXP_DIR="${BASE_RUN_DIR}/${EXP_NAME}"
 

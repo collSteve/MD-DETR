@@ -1,0 +1,28 @@
+# ------------------------------------------------------------------
+# Override *fields* inside the already-selected launcher instance.
+# It does NOT change which launcher is selected, so no duplication.
+# ------------------------------------------------------------------
+# @package hydra.launcher              
+
+partition:        ${sbatch.partition}
+qos:              ${sbatch.qos}
+nodes:            ${sbatch.nodes}
+gpus_per_node:    ${sbatch.gpus_per_node}
+gres:             ${sbatch.gpus_per_node}
+cpus_per_task:    ${sbatch.cpus_per_task}
+# mem:              ${sbatch.mem_per_node}
+# time:             ${sbatch.wall}
+name:             ${experiment.exp_name}
+tasks_per_node:  1
+
+mem_gb:           64                          # 64  → --mem=64G
+timeout_min:      120
+
+setup:
+  - "source /scratch/ssd004/scratch/stevev/miniconda3/etc/profile.d/conda.sh"
+  - "conda activate MD-DETR"
+
+submitit_folder:  ${shared.base_run_dir}/${experiment.exp_name}/logs
+additional_parameters:
+  output: ${shared.base_run_dir}/${experiment.exp_name}/logs/%x_%j.out
+  error:  ${shared.base_run_dir}/${experiment.exp_name}/logs/%x_%j.err

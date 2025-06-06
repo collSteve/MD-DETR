@@ -13,6 +13,7 @@ import pdb
 from torch.utils.data import DataLoader
 from datetime import timedelta
 
+from models.memory.experiment_prompt import ExperimentPrompt
 import utils
 import pytorch_lightning as pl
 from datasets.coco_eval import CocoEvaluator
@@ -365,6 +366,10 @@ def main(args):
             trainer.eval_mode = True
             pyl_trainer.validate(trainer,test_dataloader_known)
             ##########################################################################################################
+
+
+        if args.eval and args.use_prompts and trainer.model.model.prompts and isinstance(trainer.model.model.prompts, ExperimentPrompt):
+            trainer.model.model.prompts.save_weights_info_dict(f'{out_dir_root}/task_{task_id}_weights_info.pkl')
 
         args.log_file.close()
 

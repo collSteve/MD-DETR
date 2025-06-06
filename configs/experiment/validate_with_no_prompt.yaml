@@ -1,0 +1,12 @@
+defaults:
+  - _base
+
+exp_name:        validate_with_no_prompt
+train:           0
+
+use_prompts:     0
+
+batch_size:      1
+epochs:          16
+save_epochs:     5
+eval_epochs:     2

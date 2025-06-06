@@ -27,6 +27,8 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
+
+from models.memory.experiment_prompt import ExperimentPrompt
 from .prompt import Prompt, PromptParam
 
 from transformers.activations import ACT2FN
@@ -1323,6 +1325,7 @@ class DeformableDetrDecoder(DeformableDetrPreTrainedModel):
         task_id=None,
         train=False,
         prompts=None,
+        class_labels=None,
     ):
         r"""
         Args:
@@ -1387,7 +1390,10 @@ class DeformableDetrDecoder(DeformableDetrPreTrainedModel):
 
             p_list = None
             if query is not None:
-                p_list, _, output = prompts.forward(query, idx, hidden_states, train=train)
+                if isinstance(prompts, ExperimentPrompt):
+                    p_list, _, output = prompts.forward(query, idx, hidden_states, train=train, task_id=task_id, class_labels=class_labels)
+                else:
+                    p_list, _, output = prompts.forward(query, idx, hidden_states, train=train)
 
 
             if self.gradient_checkpointing and self.training:
@@ -1486,7 +1492,7 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         self.backbone = DeformableDetrConvModel(backbone, position_embeddings)
 
         if config.use_prompts:
-            self.prompts = Prompt(emb_d=config.d_model, n_tasks=config.n_tasks, 
+            self.prompts = ExperimentPrompt(emb_d=config.d_model, n_tasks=config.n_tasks, 
                                     prompt_param=PromptParam(e_pool_size=config.num_prompts,
                                                             e_p_length=config.prompt_len),
                                     #  prompt_param=[config.num_prompts,config.prompt_len,0],
@@ -1648,6 +1654,7 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         query=None,
         train=False,
         task_id=0,
+        class_labels=None,
     ) -> Union[Tuple[torch.FloatTensor], DeformableDetrModelOutput]:
         r"""
         Returns:
@@ -1822,6 +1829,7 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             prompts=prompts,
             train=train,
             query=query,
+            class_labels=class_labels,
         )
 
         if not return_dict:
@@ -2007,6 +2015,7 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
             query=query,
             train=train,
             task_id=task_id,
+            class_labels=None if labels is None else [label["class_labels"] for label in labels],
         )
 
         #pdb.set_trace()

@@ -1,0 +1,6 @@
+base_run_dir:   /h/stevev/MD_DETR_runs
+
+train_dir:      /scratch/ssd004/datasets/MSCOCO2017/train2017
+val_dir:        /scratch/ssd004/datasets/MSCOCO2017/val2017
+
+task_ann_root:  ${shared.base_run_dir}/upload/mscoco

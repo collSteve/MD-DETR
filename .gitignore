@@ -1,1 +1,5 @@
 **/__pycache__/
+multirun/
+nohup.out
+outputs/
+submit.log
