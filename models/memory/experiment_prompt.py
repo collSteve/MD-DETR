@@ -75,13 +75,13 @@ class ExperimentPrompt(Prompt):
             q = nn.functional.normalize(a_querry, dim=2)
             aq_k = torch.einsum('bkd,kd->bk', q, n_K)
 
-            aq_k_save = aq_k.cpu().numpy()
+            aq_k_save = aq_k.detach().tolist()
 
             if class_labels is not None:
                 class_labels_list = []
                 for class_ls in class_labels:
                     if isinstance(class_ls, torch.Tensor):
-                        class_labels_list.append(class_ls.cpu().tolist())
+                        class_labels_list.append(class_ls.detach().tolist())
                     else:
                         class_labels_list.append(class_ls)
             else:

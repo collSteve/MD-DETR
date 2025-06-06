@@ -1,7 +1,7 @@
 defaults:
   - _base
 
-exp_name:        validate_with_prompt_hydra_3
+exp_name:        validate_with_prompt_hydra_4
 train:           0
 
 use_prompts:     1

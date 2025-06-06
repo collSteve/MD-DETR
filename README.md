@@ -111,6 +111,8 @@ python run.py -m sbatch=train_sbatch hydra/launcher=slurm hydra.verbose=true
 python run.py run.local=true experiment=validate_with_prompt
 
 nohup python run.py -m sbatch=train_sbatch hydra/launcher=slurm &> outputs/submit.log &
+
+nohup python run.py -m experiment=train_with_prompt sbatch=train_sbatch_scavenger hydra/launcher=slurm &> outputs/submit.log &
 ```
 
 ```python
