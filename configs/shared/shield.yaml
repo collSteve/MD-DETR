@@ -1,0 +1,9 @@
+defaults:
+  - default
+
+base_run_dir: /ubc/cs/research/shield/projects/kren04/MD_DETR_runs
+
+train_dir: /ubc/cs/research/shield/datasets/MSCOCO/2017/train2017
+val_dir: /ubc/cs/research/shield/datasets/MSCOCO/2017/val2017
+
+task_ann_root:  ${shared.base_run_dir}/upload/mscoco

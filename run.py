@@ -8,6 +8,9 @@ def main(cfg: DictConfig):
     out_dir = pathlib.Path(cfg.shared.base_run_dir) / cfg.experiment.exp_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    print(f"sbatch gpu per node: {cfg.sbatch.gpus_per_node}")
+    print(f"sbatch nodes: {cfg.sbatch.nodes}")
+
     # -------- build CLI --------
     common = [
         "--output_dir",    str(out_dir),

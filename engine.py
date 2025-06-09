@@ -56,7 +56,7 @@ class local_trainer(pl.LightningModule):
 			
 			self.processor = DeformableDetrImageProcessor()
 
-		if self.model.model.prompts:
+		if getattr(self.model.model, 'prompts', None):
 			self.model.model.prompts.reset_parameters()
 
 		find_param_nans(self.model)

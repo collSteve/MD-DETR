@@ -1,8 +1,8 @@
 partition:       rtx6000
 qos:             m
 nodes:           1
-gpus_per_node:   4
-cpus_per_task:   4
+gpus_per_node:   8
+cpus_per_task:   2
 mem_per_node_gb:    64
 time_min:        120
 wall:            2:00:00 
