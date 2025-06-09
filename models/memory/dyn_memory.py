@@ -14,6 +14,24 @@ class TaskMemory(nn.Module):
         self.k_list = nn.ParameterList()
         self.a_list = nn.ParameterList()
         self.add_units(init_units)
+    
+    def reset_parameters(self):
+        """Re-initializes every p/k/a in this task's memory."""
+        for p in self.p_list:
+            if self.ortho:
+                nn.init.orthogonal_(p)
+            else:
+                nn.init.uniform_(p)
+        for k in self.k_list:
+            if self.ortho:
+                nn.init.orthogonal_(k.unsqueeze(0))
+            else:
+                nn.init.uniform_(k)
+        for a in self.a_list:
+            if self.ortho:
+                nn.init.orthogonal_(a.unsqueeze(0))
+            else:
+                nn.init.uniform_(a)
 
     def add_units(self, num_units=1):
 
@@ -40,11 +58,20 @@ class TaskMemory(nn.Module):
 
 
 class DynamicPrompt(nn.Module):
-    def __init__(self, emb_d, key_d, default_units, e_p_length, e_layers: Sequence[int] = [0,1,2,3,4,5], ortho_mu=0.0):
+    def __init__(self, emb_d, key_d, default_units, e_p_length, 
+                 e_layers: Sequence[int] = [0,1,2,3,4,5], local_query: bool = False,
+                 ortho_mu=0.0):
         super().__init__()
         self.emb_d, self.key_d, self.e_p_length = emb_d, key_d, e_p_length
         self.ortho_mu = ortho_mu
         self.default_units = default_units
+
+        self.local_query = local_query
+
+        if local_query:
+            self.query_tf = nn.Sequential(
+                            nn.Linear(300*256, 300),
+            )
 
         self.layer_memories = nn.ModuleDict({
             str(layer): nn.ModuleDict()
@@ -52,18 +79,51 @@ class DynamicPrompt(nn.Module):
         })
 
 
-    def _ensure_task(self, layer: str, task_id: str):
+        self.task_count = 0 # not used
+    
+    def reset_parameters(self):
+        """
+        Re-initializes every TaskMemory in every layer.
+        Call this once _after_ loading the pretrained weights so none of the
+        meta-device placeholders remain un-initialized.
+        """
+        for layer_dict in self.layer_memories.values():
+            for mem in layer_dict.values():
+                mem.reset_parameters()
+
+    # Not used
+    def set_task_id(self, task_id=0):
+        self.task_count = task_id
+
+        print('Setting task id : ', task_id)
+
+
+    def _ensure_task(self, layer: str, task_id: str, device: torch.device):
         """Create a TaskMemory if this (layer, task) is new."""
         tid = str(task_id)
 
         if tid not in self.layer_memories[layer]:
-            self.layer_memories[layer][tid] = TaskMemory(
+            mem = TaskMemory(
                 emb_d=self.emb_d,
                 key_d=self.key_d,
                 init_units=self.default_units,
-                length=self.e_p_length,
+                e_p_length=self.e_p_length,
                 ortho=(self.ortho_mu > 0)
             )
+            mem = mem.to(device)
+            self.layer_memories[layer][tid] = mem
+
+    def initialize_for_task(self, task_id: int, device: torch.device):
+        """
+        Public hook: create all per-layer memories for `task_id`
+        and record it as the current task.
+        """
+        tid = str(task_id)
+        for layer in self.layer_memories.keys():
+            self._ensure_task(layer, tid, device)
+            
+        self.current_task = tid
+
 
     def grow(self, layer: int, task_id: int, num_units: int = 1):
         L, T = str(layer), str(task_id)
@@ -84,9 +144,19 @@ class DynamicPrompt(nn.Module):
         layer = str(l)
         if layer not in self.layer_memories:
             return None, 0, x_block
+        
 
-        if task_id is not None:
-            self._ensure_task(layer, str(task_id)) # init if not existing
+        if self.local_query and x_query.dim() != 2:
+            # flatten everything except batch
+            B = x_query.size(0)
+            flat = x_query.view(B, -1)                   # (B, query_in_dim)
+            qwt = self.query_tf(flat)                    # (B, query_out_dim)
+            x_query = x_query * qwt.unsqueeze(-1)        # broadcast back
+            x_query = x_query.sum(dim=1)
+
+
+        # if task_id is not None:
+        #     self._ensure_task(layer, str(task_id)) # init if not existing
 
 
         Ps, Ks, As = [], [], []

@@ -276,10 +276,10 @@ def main(args):
         trainer = local_trainer(train_loader=train_dataloader,val_loader=test_dataloader,
                                       test_dataset=test_dataset,args=args,local_evaluator=local_evaluator,task_id=task_id)
         
-        if args.use_prompts:
-            print ('previous task : ', trainer.model.model.prompts.task_count, file=args.log_file)
-            trainer.model.model.prompts.set_task_id(task_id-1)
-            print ('current task : ', trainer.model.model.prompts.task_count, file=args.log_file)
+        # if args.use_prompts:
+        #     print ('previous task : ', trainer.model.model.prompts.task_count, file=args.log_file)
+        #     trainer.model.model.prompts.set_task_id(task_id-1)
+        #     print ('current task : ', trainer.model.model.prompts.task_count, file=args.log_file)
 
         if task_id>1:
             if not args.eval:

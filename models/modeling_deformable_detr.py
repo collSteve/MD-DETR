@@ -28,6 +28,7 @@ from torch import Tensor, nn
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 
+from models.memory.dyn_memory import DynamicPrompt
 from models.memory.experiment_prompt import ExperimentPrompt
 from .prompt import Prompt, PromptParam
 
@@ -1393,7 +1394,7 @@ class DeformableDetrDecoder(DeformableDetrPreTrainedModel):
                 if isinstance(prompts, ExperimentPrompt):
                     p_list, _, output = prompts.forward(query, idx, hidden_states, train=train, task_id=task_id, class_labels=class_labels)
                 else:
-                    p_list, _, output = prompts.forward(query, idx, hidden_states, train=train)
+                    p_list, _, output = prompts.forward(query, idx, hidden_states, train=train, task_id=task_id)
 
 
             if self.gradient_checkpointing and self.training:
@@ -1492,11 +1493,13 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         self.backbone = DeformableDetrConvModel(backbone, position_embeddings)
 
         if config.use_prompts:
-            self.prompts = ExperimentPrompt(emb_d=config.d_model, n_tasks=config.n_tasks, 
-                                    prompt_param=PromptParam(e_pool_size=config.num_prompts,
-                                                            e_p_length=config.prompt_len),
-                                    #  prompt_param=[config.num_prompts,config.prompt_len,0],
-                                     key_dim=config.d_model, args=config)
+            # self.prompts = ExperimentPrompt(emb_d=config.d_model, n_tasks=config.n_tasks, 
+            #                         prompt_param=PromptParam(e_pool_size=config.num_prompts,
+            #                                                 e_p_length=config.prompt_len),
+            #                         #  prompt_param=[config.num_prompts,config.prompt_len,0],
+            #                          key_dim=config.d_model, args=config)
+            self.prompts = DynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
+                                         e_p_length=config.prompt_len, local_query=config.local_query)
 
         # Create input projection layers
         if config.num_feature_levels > 1:

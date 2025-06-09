@@ -3,6 +3,7 @@ import sys
 import pdb
 import tqdm
 import torch
+from models.memory.dyn_memory import DynamicPrompt
 import utils
 import numpy as np
 import torch.nn as nn
@@ -295,6 +296,15 @@ class local_trainer(pl.LightningModule):
 
 	def val_dataloader(self):
 		return self.val_dataloader
+	
+	def setup(self, stage=None):
+		if self.args.use_prompts:
+			prompts = self.model.model.prompts
+
+			prompts.set_task_id(self.task_id - 1)
+			
+			if isinstance(prompts, DynamicPrompt):
+				prompts.initialize_for_task(self.task_id, self.device)
 
 class Evaluator():
 	def __init__(self, processor, test_dataset, test_dataloader, coco_evaluator, 
