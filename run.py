@@ -30,7 +30,7 @@ def main(cfg: DictConfig):
         "--prompt_len",    str(cfg.experiment.plen),
         "--freeze",        cfg.experiment.freeze,
         "--new_params",    cfg.experiment.new_params,
-        "--start_task",    "1",
+        "--start_task",    str(cfg.experiment.start_task),
         "--n_tasks",       str(cfg.experiment.n_tasks),
 
     ]
@@ -50,7 +50,7 @@ def main(cfg: DictConfig):
             "--checkpoint_dir", cfg.experiment.checkpoint_dir,
             "--checkpoint_base",cfg.experiment.checkpoint_base,
             "--checkpoint_next",cfg.experiment.checkpoint_next,
-            "--resume",         "0",
+            "--resume",         str(cfg.experiment.resume),
         ]
     else:
         mode = [

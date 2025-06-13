@@ -23,3 +23,6 @@ repo_name:           SenseTime/deformable-detr
 freeze:              backbone,encoder,decoder
 new_params:          class_embed,prompts
 viz:                 --viz
+
+start_task: 1
+resume: 0

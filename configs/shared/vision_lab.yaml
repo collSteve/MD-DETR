@@ -1,0 +1,10 @@
+defaults:
+  - default
+
+
+base_run_dir: /home/kren04/Documents/MD_DETR_runs
+
+train_dir: /home/kren04/datasets/MSCOCO/2017/train2017
+val_dir: /home/kren04/datasets/MSCOCO/2017/val2017
+
+task_ann_root:  ${shared.base_run_dir}/upload/mscoco

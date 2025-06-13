@@ -1,12 +1,12 @@
 defaults:
   - _base
 
-exp_name:        train_with_promp_dyn_mem
+exp_name:        train_with_promp_dyn_mem_2_tasks
 train:           1
 
 use_prompts:     1 
 
 batch_size:      1
 epochs:          6
-save_epochs:     1
+save_epochs:     10
 eval_epochs:     1

@@ -13,6 +13,7 @@ import pdb
 from torch.utils.data import DataLoader
 from datetime import timedelta
 
+from models.memory.dyn_memory import DynamicPrompt
 from models.memory.experiment_prompt import ExperimentPrompt
 import utils
 import pytorch_lightning as pl
@@ -243,7 +244,7 @@ def main(args):
         if task_id == 1:
             args.epochs = 11
         else:
-            args.epochs = 6
+            args.epochs = 2
 
         #args.switch = True
         args.task = str(task_id)
@@ -252,7 +253,8 @@ def main(args):
         pyl_trainer = pl.Trainer(devices=list(range(args.n_gpus)), accelerator="gpu", max_epochs=args.epochs, 
                     gradient_clip_val=0.1, accumulate_grad_batches=int(32/(args.n_gpus*args.batch_size)), \
                     check_val_every_n_epoch=args.eval_epochs, callbacks=[checkpoint_callback],
-                    log_every_n_steps=args.print_freq, logger=logger, num_sanity_val_steps=0)
+                    log_every_n_steps=args.print_freq, logger=logger, num_sanity_val_steps=0,
+                    strategy="ddp_find_unused_parameters_true")
         
         tr_ann = os.path.join(args.task_ann_dir,'train_task_'+str(task_id)+'.json')
         tst_ann = os.path.join(args.task_ann_dir,'test_task_'+str(task_id)+'.json')
@@ -277,6 +279,14 @@ def main(args):
                                       test_dataset=test_dataset,args=args,local_evaluator=local_evaluator,task_id=task_id)
         
         # if args.use_prompts:
+        #     prompts = trainer.model.model.prompts
+
+        #     prompts.set_task_id(task_id - 1)
+
+        #     if isinstance(prompts, DynamicPrompt):
+        #         prompts.initialize_for_task(task_id)
+                    
+        # if args.use_prompts:
         #     print ('previous task : ', trainer.model.model.prompts.task_count, file=args.log_file)
         #     trainer.model.model.prompts.set_task_id(task_id-1)
         #     print ('current task : ', trainer.model.model.prompts.task_count, file=args.log_file)
@@ -287,11 +297,12 @@ def main(args):
                     prev_task = args.checkpoint_dir.replace('Task_1','Task_'+str(task_id-1))
                     args.resume=0
                 else:
-                    prev_task = args.output_dir.replace('Task_'+str(task_id),'Task_'+str(task_id-1))
+                    # prev_task = args.output_dir.replace('Task_'+str(task_id),'Task_'+str(task_id-1))
+                    prev_task = args.output_dir
             else:
                 prev_task = args.checkpoint_dir.replace('Task_1','Task_'+str(task_id))
             
-            if task_id == args.start_task:
+            if task_id == 1:
                 trainer.resume(os.path.join(prev_task,args.checkpoint_base))
             else:
                 trainer.resume(os.path.join(prev_task,args.checkpoint_next))

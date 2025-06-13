@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 import pdb
@@ -50,10 +51,23 @@ class local_trainer(pl.LightningModule):
 			self.model =  DeformableDetrForObjectDetection.from_pretrained(args.repo_name,config=detr_config,
 																	ignore_mismatched_sizes=True,
 																	default=not(args.mask_gradients), log_file=args.log_file)
+			
+			prompts = self.model.model.prompts
+			if prompts:
+				prompts.reset_parameters()
+				for tid in range(1, task_id+1):
+					prompts.initialize_for_task(tid)
+				prompts.set_task_id(task_id - 1)
 			self.processor = DeformableDetrImageProcessor.from_pretrained(args.repo_name)
 		else:
 			self.model = DeformableDetrForObjectDetection(detr_config, default=not(args.mask_gradients),
 												 log_file=args.log_file)
+			prompts = self.model.model.prompts
+			if prompts:
+				prompts.reset_parameters()
+				for tid in range(1, task_id+1):
+					prompts.initialize_for_task(tid)
+				prompts.set_task_id(task_id - 1)
 			
 			self.processor = DeformableDetrImageProcessor()
 
@@ -78,6 +92,15 @@ class local_trainer(pl.LightningModule):
 		self.PREV_INTRODUCED_CLS = args.task_map[task_id][1]
 
 		#self.automatic_optimization = False
+		debug_dir = os.path.join(args.output_dir, "debug_logs")
+		os.makedirs(debug_dir, exist_ok=True)
+		# make a logger
+		self._mem_logger = logging.getLogger(f"mem_debug_task{task_id}")
+		self._mem_logger.setLevel(logging.INFO)
+		# file handler writes to memory_debug_task{task_id}.log
+		fh = logging.FileHandler(os.path.join(debug_dir, f"memory_debug_task{task_id}.log"))
+		fh.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+		self._mem_logger.addHandler(fh)
 	
 	def forward(self, pixel_values, pixel_mask):
 		outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask)
@@ -101,10 +124,12 @@ class local_trainer(pl.LightningModule):
 
 		return labels
 	
-	def common_step(self, batch, batch_idx, return_outputs=None):
+	def common_step(self, batch, batch_idx, return_outputs=None, train=False, class_wise=False):
 		pixel_values = batch["pixel_values"].to(self.device)
 		pixel_mask = batch["pixel_mask"].to(self.device)
 		labels = [{k: v.to(self.device) for k, v in t.items()} for t in batch["labels"]]
+
+		# print(labels)
 
 		# print(f"Labels: {labels}")
 		orig_target_sizes = torch.stack([target["orig_size"] for target in labels], dim=0)
@@ -138,10 +163,14 @@ class local_trainer(pl.LightningModule):
 		
 		# BG thresholding on previously seen classes
 		if self.args.bg_thres and not return_outputs and self.args.use_prompts:
-		# if self.args.bg_thres and not return_outputs:
 			labels = self.BG_thresholding(results=results, labels=labels)
 
-		outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels, query=query, train=True, task_id=self.task_id)
+		if class_wise and train:
+			class_labels = [label['class_labels'] for label in labels]
+			outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels, query=query, train=True, task_id=self.task_id)
+		else:
+			outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels, query=query, train=True, task_id=self.task_id)
+
 
 		loss = outputs.loss
 		loss_dict = outputs.loss_dict
@@ -182,6 +211,13 @@ class local_trainer(pl.LightningModule):
 		for i in range(len(self.model.class_embed)):
 			self.model.class_embed[i].weight.grad[:self.PREV_INTRODUCED_CLS,:] = 0
 			self.model.class_embed[i].bias.grad[:self.PREV_INTRODUCED_CLS] = 0
+
+		# unused = [name for name, p in self.named_parameters() if p.grad is None]
+		# if unused:
+		# 	self._mem_logger.info(f"⚠️  Unused parameters ({len(unused)}):")
+		# 	for n in unused:
+		# 		self._mem_logger.info(f"    {n}")
+
 		return
 
 	def on_train_epoch_end(self):
@@ -297,14 +333,21 @@ class local_trainer(pl.LightningModule):
 	def val_dataloader(self):
 		return self.val_dataloader
 	
-	def setup(self, stage=None):
-		if self.args.use_prompts:
-			prompts = self.model.model.prompts
+	def on_train_start(self):
+		prompts = getattr(self.model.model, "prompts", None)
+		if prompts is not None:
+			for layer, task_dict in prompts.layer_memories.items():
+				for tid, mem in task_dict.items():
+					self._mem_logger.info(
+						f"Layer {layer} | Task {tid} | #p={len(mem.p_list)} #k={len(mem.k_list)} #a={len(mem.a_list)}"
+					)
+		# every parameter’s device
+		# self._mem_logger.info("=== Parameter device map ===")
+		# for name, p in self.model.named_parameters():
+		# 	# if name.startswith("model.prompts."):
+		# 	self._mem_logger.info(f"{name:<60} → {p.device}")
+		# self._mem_logger.info("============================")
 
-			prompts.set_task_id(self.task_id - 1)
-			
-			if isinstance(prompts, DynamicPrompt):
-				prompts.initialize_for_task(self.task_id, self.device)
 
 class Evaluator():
 	def __init__(self, processor, test_dataset, test_dataloader, coco_evaluator, 

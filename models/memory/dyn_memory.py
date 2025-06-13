@@ -98,7 +98,7 @@ class DynamicPrompt(nn.Module):
         print('Setting task id : ', task_id)
 
 
-    def _ensure_task(self, layer: str, task_id: str, device: torch.device):
+    def _ensure_task(self, layer: str, task_id: str):
         """Create a TaskMemory if this (layer, task) is new."""
         tid = str(task_id)
 
@@ -110,17 +110,34 @@ class DynamicPrompt(nn.Module):
                 e_p_length=self.e_p_length,
                 ortho=(self.ortho_mu > 0)
             )
-            mem = mem.to(device)
+            # mem = mem.to(device)
             self.layer_memories[layer][tid] = mem
 
-    def initialize_for_task(self, task_id: int, device: torch.device):
+    def initialize_for_subcategory(self, subcategory_name: str, num_memory_units:int = 1):
+        for layer in self.layer_memories.keys():
+            if subcategory_name in self.layer_memories[layer]:
+                print(f"Warning: Subcategory {subcategory_name} already exists in layer {layer}.")
+                continue
+
+            self.layer_memories[layer][subcategory_name] = TaskMemory(
+                emb_d=self.emb_d,
+                key_d=self.key_d,
+                init_units=num_memory_units,
+                e_p_length=self.e_p_length,
+                ortho=self.ortho_mu > 0.0
+            )
+
+
+    def initialize_for_task(self, task_id: int):
         """
         Public hook: create all per-layer memories for `task_id`
         and record it as the current task.
         """
         tid = str(task_id)
-        for layer in self.layer_memories.keys():
-            self._ensure_task(layer, tid, device)
+        # for layer in self.layer_memories.keys():
+        #     self._ensure_task(layer, tid)
+        self.initialize_for_subcategory(tid, self.default_units)
+
             
         self.current_task = tid
 
@@ -162,8 +179,13 @@ class DynamicPrompt(nn.Module):
         Ps, Ks, As = [], [], []
         for tid_s, mem in self.layer_memories[layer].items():
             Pk, Kk, Ak = mem.forward()
-            # only freeze non-current‐task units during training
-            if train and task_id is not None and tid_s != str(task_id):
+            if not train:
+                # during evaluation, detach all parameters
+                Pk = Pk.detach()
+                Kk = Kk.detach()
+                Ak = Ak.detach()
+            elif task_id is not None and tid_s != str(task_id):
+                # during training, detach all parameters except the current task
                 Pk = Pk.detach()
                 Kk = Kk.detach()
                 Ak = Ak.detach()
