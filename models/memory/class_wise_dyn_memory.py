@@ -11,11 +11,16 @@ class ClassWiseDynamicPrompt(DynamicPrompt):
                  ortho_mu=0.0):
         super().__init__(emb_d, key_d, default_units, e_p_length, 
                          e_layers=e_layers, local_query=local_query, ortho_mu=ortho_mu)
+        
+        self.active_classes_batch = []
     
     
     def initialize_for_task(self, task_id: int, object_classes: Sequence[str]):
         for obj_class in object_classes:
             self.initialize_for_subcategory(obj_class, self.default_units)
+
+    def set_activate_classes(self, object_classes_batch: Sequence[Sequence[str]]):
+        self.active_classes_batch = object_classes_batch
         
     def forward(self,
                 x_query: torch.Tensor,
@@ -23,19 +28,28 @@ class ClassWiseDynamicPrompt(DynamicPrompt):
                 x_block: torch.Tensor,
                 train: bool = False,
                 task_id: int = None,
-                object_classes: Sequence[str] = None,):
+                object_classes_batched: Sequence[Sequence[str]] = None,):
         layer = str(l)
         if layer not in self.layer_memories:
             return None, 0, x_block
         
 
-        if self.local_query and x_query.dim() != 2:
-            # flatten everything except batch
-            B = x_query.size(0)
-            flat = x_query.view(B, -1)                   # (B, query_in_dim)
-            qwt = self.query_tf(flat)                    # (B, query_out_dim)
-            x_query = x_query * qwt.unsqueeze(-1)        # broadcast back
+        if x_query.dim() != 2:
+            if self.local_query:
+                # flatten everything except batch
+                B = x_query.size(0)
+                flat = x_query.view(B, -1)                   # (B, query_in_dim)
+                qwt = self.query_tf(flat)                    # (B, query_out_dim)
+                x_query = x_query * qwt.unsqueeze(-1)        # broadcast back
+                
             x_query = x_query.sum(dim=1)
+
+        
+        object_classes = self.active_classes_batch[0] # Only work for batchsize = 1; TODO
+        if object_classes is None:
+            print("Warning: object_classes_batched is None")
+        if len(object_classes) == 0:
+            print("Warning: object_classes_batched is empty")
 
         Ps, Ks, As = [], [], []
         for class_name, mem in self.layer_memories[layer].items():

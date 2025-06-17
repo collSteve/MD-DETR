@@ -137,7 +137,7 @@ def get_args_parser():
                         help='Directory to save outputs')
     parser.add_argument('--device', default='cuda', 
                         help='Device for training (default is CUDA)')
-    parser.add_argument('--seed', default=42, type=int, 
+    parser.add_argument('--seed', default=43, type=int, 
                         help='Random seed')
     parser.add_argument('--resume', default=0, type=int, 
                         help='Resume training from a specific checkpoint')
@@ -224,6 +224,8 @@ def main(args):
     out_dir_root = args.output_dir
     
     args.task_map, args.task_label2name =  task_info_coco(split_point=args.split_point)
+    # print(args.task_map)
+    # print(args.task_label2name)
     args.task_label2name[args.n_classes-1] = "BG"
 
     if args.repo_name:
@@ -244,7 +246,7 @@ def main(args):
         if task_id == 1:
             args.epochs = 11
         else:
-            args.epochs = 2
+            args.epochs = 6
 
         #args.switch = True
         args.task = str(task_id)
@@ -297,8 +299,8 @@ def main(args):
                     prev_task = args.checkpoint_dir.replace('Task_1','Task_'+str(task_id-1))
                     args.resume=0
                 else:
-                    # prev_task = args.output_dir.replace('Task_'+str(task_id),'Task_'+str(task_id-1))
-                    prev_task = args.output_dir
+                    prev_task = args.output_dir.replace('Task_'+str(task_id),'Task_'+str(task_id-1))
+                    # prev_task = args.output_dir
             else:
                 prev_task = args.checkpoint_dir.replace('Task_1','Task_'+str(task_id))
             

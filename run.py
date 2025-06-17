@@ -32,6 +32,10 @@ def main(cfg: DictConfig):
         "--new_params",    cfg.experiment.new_params,
         "--start_task",    str(cfg.experiment.start_task),
         "--n_tasks",       str(cfg.experiment.n_tasks),
+        "--local_query",    str(cfg.experiment.local_query),
+        "--checkpoint_dir", cfg.experiment.checkpoint_dir,
+        "--checkpoint_base",cfg.experiment.checkpoint_base,
+        "--checkpoint_next",cfg.experiment.checkpoint_next,
 
     ]
 
@@ -45,11 +49,7 @@ def main(cfg: DictConfig):
             "--eval_epochs",    str(cfg.experiment.eval_epochs),
             "--bg_thres",       str(cfg.experiment.bg_thres),
             "--bg_thres_topk",  str(cfg.experiment.bg_thres_topk),
-            "--local_query",    "1",
             "--lambda_query",   str(cfg.experiment.lambda_query),
-            "--checkpoint_dir", cfg.experiment.checkpoint_dir,
-            "--checkpoint_base",cfg.experiment.checkpoint_base,
-            "--checkpoint_next",cfg.experiment.checkpoint_next,
             "--resume",         str(cfg.experiment.resume),
         ]
     else:
@@ -58,10 +58,7 @@ def main(cfg: DictConfig):
             "--epochs",         str(cfg.experiment.epochs),
             "--save_epochs",    str(cfg.experiment.save_epochs),
             "--eval_epochs",    str(cfg.experiment.eval_epochs),
-            "--checkpoint_dir", cfg.experiment.checkpoint_dir,
-            "--checkpoint_base",cfg.experiment.checkpoint_base,
-            "--checkpoint_next",cfg.experiment.checkpoint_next,
-            "--local_query",    "1",
+            
         ]
 
     torchrun = [

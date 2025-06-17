@@ -26,3 +26,5 @@ viz:                 --viz
 
 start_task: 1
 resume: 0
+
+local_query: 1

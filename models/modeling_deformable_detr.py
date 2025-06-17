@@ -28,6 +28,7 @@ from torch import Tensor, nn
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 
+from models.memory.class_wise_dyn_memory import ClassWiseDynamicPrompt
 from models.memory.dyn_memory import DynamicPrompt
 from models.memory.experiment_prompt import ExperimentPrompt
 from .prompt import Prompt, PromptParam
@@ -1500,6 +1501,8 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             #                          key_dim=config.d_model, args=config)
             self.prompts = DynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
                                          e_p_length=config.prompt_len, local_query=config.local_query)
+            # self.prompts = ClassWiseDynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=2, 
+            #                                         e_p_length=config.prompt_len, local_query=config.local_query)
 
         # Create input projection layers
         if config.num_feature_levels > 1:

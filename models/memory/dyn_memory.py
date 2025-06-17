@@ -2,6 +2,7 @@ from typing import Sequence
 import torch
 import torch.nn as nn
 
+from models.memory.base_prompt import BasePromptModule
 from models.prompt import Prompt, PromptParam
 
 class TaskMemory(nn.Module):
@@ -57,7 +58,7 @@ class TaskMemory(nn.Module):
         return P, K, A
 
 
-class DynamicPrompt(nn.Module):
+class DynamicPrompt(BasePromptModule):
     def __init__(self, emb_d, key_d, default_units, e_p_length, 
                  e_layers: Sequence[int] = [0,1,2,3,4,5], local_query: bool = False,
                  ortho_mu=0.0):
@@ -68,10 +69,10 @@ class DynamicPrompt(nn.Module):
 
         self.local_query = local_query
 
-        if local_query:
-            self.query_tf = nn.Sequential(
-                            nn.Linear(300*256, 300),
-            )
+        # if local_query:
+        self.query_tf = nn.Sequential(
+                        nn.Linear(300*256, 300),
+        )
 
         self.layer_memories = nn.ModuleDict({
             str(layer): nn.ModuleDict()
@@ -138,7 +139,6 @@ class DynamicPrompt(nn.Module):
         #     self._ensure_task(layer, tid)
         self.initialize_for_subcategory(tid, self.default_units)
 
-            
         self.current_task = tid
 
 
@@ -163,8 +163,9 @@ class DynamicPrompt(nn.Module):
             return None, 0, x_block
         
 
-        if self.local_query and x_query.dim() != 2:
+        if x_query.dim() != 2:
             # flatten everything except batch
+            # if self.local_query:
             B = x_query.size(0)
             flat = x_query.view(B, -1)                   # (B, query_in_dim)
             qwt = self.query_tf(flat)                    # (B, query_out_dim)

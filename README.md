@@ -130,6 +130,10 @@ python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_
 
 
 python run.py run.local=true experiment=train_with_no_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield
+
+python run.py run.local=true experiment=train_with_promp_class_wise_memory experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield
+
+python run.py run.local=true experiment=train_with_promp_dyn_mem_always_quertf_local_query_0 experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield
 ```
 
 ```python

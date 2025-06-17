@@ -4,6 +4,7 @@ import sys
 import pdb
 import tqdm
 import torch
+from models.memory.class_wise_dyn_memory import ClassWiseDynamicPrompt
 from models.memory.dyn_memory import DynamicPrompt
 import utils
 import numpy as np
@@ -15,6 +16,9 @@ from PIL import Image, ImageDraw
 from datasets.coco_eval import CocoEvaluator
 import torch.nn.functional as F
 from datasets.coco_hug import CocoDetection, task_info_coco, create_task_json
+
+from g_utils.common import stardardize_object_class_name
+
 from models.image_processing_deformable_detr import DeformableDetrImageProcessor 
 from models.configuration_deformable_detr import DeformableDetrConfig
 from models.md_detr.configuration_md_detr import MDDetrConfig
@@ -51,28 +55,34 @@ class local_trainer(pl.LightningModule):
 			self.model =  DeformableDetrForObjectDetection.from_pretrained(args.repo_name,config=detr_config,
 																	ignore_mismatched_sizes=True,
 																	default=not(args.mask_gradients), log_file=args.log_file)
-			
-			prompts = self.model.model.prompts
-			if prompts:
-				prompts.reset_parameters()
-				for tid in range(1, task_id+1):
-					prompts.initialize_for_task(tid)
-				prompts.set_task_id(task_id - 1)
 			self.processor = DeformableDetrImageProcessor.from_pretrained(args.repo_name)
 		else:
 			self.model = DeformableDetrForObjectDetection(detr_config, default=not(args.mask_gradients),
 												 log_file=args.log_file)
-			prompts = self.model.model.prompts
-			if prompts:
-				prompts.reset_parameters()
-				for tid in range(1, task_id+1):
-					prompts.initialize_for_task(tid)
-				prompts.set_task_id(task_id - 1)
-			
 			self.processor = DeformableDetrImageProcessor()
 
 		if getattr(self.model.model, 'prompts', None):
-			self.model.model.prompts.reset_parameters()
+			prompts = self.model.model.prompts
+			if isinstance(prompts, ClassWiseDynamicPrompt):
+				# get all classes present in current task
+				object_class_names = []
+				for tid in range(1, task_id+1):
+					class_names, start_idx, num_classes = args.task_map[tid]
+					object_class_names.extend(class_names)
+
+				# standardize class names
+				stadardized_object_class_names = [stardardize_object_class_name(name) for name in object_class_names]
+				
+				print(f"object classes for task {task_id}: {stadardized_object_class_names}")
+
+				prompts.initialize_for_task(task_id, object_classes=stadardized_object_class_names)
+
+			else:
+				for tid in range(1, task_id+1):
+						prompts.initialize_for_task(tid)
+
+			prompts.set_task_id(task_id - 1)
+			prompts.reset_parameters()
 
 		find_param_nans(self.model)
 		
@@ -124,7 +134,7 @@ class local_trainer(pl.LightningModule):
 
 		return labels
 	
-	def common_step(self, batch, batch_idx, return_outputs=None, train=False, class_wise=False):
+	def common_step(self, batch, batch_idx, return_outputs=None, train=False, class_wise=True):
 		pixel_values = batch["pixel_values"].to(self.device)
 		pixel_mask = batch["pixel_mask"].to(self.device)
 		labels = [{k: v.to(self.device) for k, v in t.items()} for t in batch["labels"]]
@@ -166,7 +176,20 @@ class local_trainer(pl.LightningModule):
 			labels = self.BG_thresholding(results=results, labels=labels)
 
 		if class_wise and train:
-			class_labels = [label['class_labels'] for label in labels]
+			raw_class_labels_batches = [label['class_labels'] for label in labels]
+			# print(f"Class labels: {class_labels}")
+			class_names_batches = []
+
+			for batch_labels in raw_class_labels_batches:
+				list_labels = batch_labels.tolist()
+				class_names_batches.append([ stardardize_object_class_name(self.args.task_label2name[i]) for i in list_labels ])
+
+			
+			prompts = self.model.model.prompts
+			if prompts is not None and isinstance(prompts, ClassWiseDynamicPrompt):
+
+				prompts.set_activate_classes(class_names_batches)
+
 			outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels, query=query, train=True, task_id=self.task_id)
 		else:
 			outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels, query=query, train=True, task_id=self.task_id)
@@ -197,7 +220,7 @@ class local_trainer(pl.LightningModule):
 		return loss, loss_dict
 	
 	def training_step(self, batch, batch_idx): # automatic training schedule
-		loss, loss_dict = self.common_step(batch, batch_idx)
+		loss, loss_dict = self.common_step(batch, batch_idx, train=True)
 		# logs metrics for each training_step
 		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL'}
 		self.log("tr", loss, prog_bar=True)

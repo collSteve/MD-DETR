@@ -12,3 +12,5 @@ class BasePromptModule(nn.Module, ABC):
     def forward(self, x_query, layer_idx, x_block, train=False, task_id=None, **kwargs):
         """Injects prompts into the decoder; returns ([Ek, Ev], loss, x_block)."""
         ...
+
+    
