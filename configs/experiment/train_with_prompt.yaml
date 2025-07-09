@@ -1,7 +1,7 @@
 defaults:
   - _base
 
-exp_name:        train_with_promp_dyn_mem_class_wise
+exp_name:        test
 train:           1
 
 use_prompts:     1 

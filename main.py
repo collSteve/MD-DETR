@@ -15,6 +15,7 @@ from datetime import timedelta
 
 from models.memory.dyn_memory import DynamicPrompt
 from models.memory.experiment_prompt import ExperimentPrompt
+from models.probes.memory_probe import DebugAttribute
 import utils
 import pytorch_lightning as pl
 from datasets.coco_eval import CocoEvaluator
@@ -246,7 +247,7 @@ def main(args):
         if task_id == 1:
             args.epochs = 11
         else:
-            args.epochs = 6
+            args.epochs = 8
 
         #args.switch = True
         args.task = str(task_id)
@@ -280,6 +281,8 @@ def main(args):
         trainer = local_trainer(train_loader=train_dataloader,val_loader=test_dataloader,
                                       test_dataset=test_dataset,args=args,local_evaluator=local_evaluator,task_id=task_id)
         
+        pyl_trainer.callbacks.append(trainer.mem_probe)
+
         # if args.use_prompts:
         #     prompts = trainer.model.model.prompts
 
@@ -319,7 +322,9 @@ def main(args):
         ####################### Training/Evaluating on Current classes ################################################
         if args.eval:
             trainer.evaluator.local_eval = 1
-            pyl_trainer.validate(trainer,test_dataloader)
+            # trainer.set_probe_active(True, debug_attribute=DebugAttribute(true_task_id="cur"))
+            pyl_trainer.validate(trainer, test_dataloader)
+            # trainer.set_probe_active(False)
         else:
             pyl_trainer.fit(trainer, train_dataloader, test_dataloader)
         #############################################################################################################
@@ -327,6 +332,7 @@ def main(args):
         if task_id>1:
 
             ####################### Evaluating on previous classes ###################################################
+
             prev_task_ids = ''.join(str(i) for i in range(1,task_id))
             tst_ann_prev = os.path.join(args.task_ann_dir,'test_task_'+str(prev_task_ids)+'.json')
             test_dataset_prev = CocoDetection(img_folder=args.test_img_dir, 
@@ -351,7 +357,13 @@ def main(args):
             trainer.evaluator = local_evaluator
             trainer.evaluator.model = trainer.model
             trainer.eval_mode = True
+
+            # trainer.set_probe_active(True, debug_attribute=DebugAttribute(true_task_id="prev"))
+
             pyl_trainer.validate(trainer,test_dataloader_prev)
+
+            # trainer.set_probe_active(False)
+
             ##########################################################################################################
 
             ####################### Evaluating on all known classes ###################################################

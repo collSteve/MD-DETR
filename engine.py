@@ -6,6 +6,7 @@ import tqdm
 import torch
 from models.memory.class_wise_dyn_memory import ClassWiseDynamicPrompt
 from models.memory.dyn_memory import DynamicPrompt
+from models.probes.memory_probe import DebugAttribute, MemoryProbe
 import utils
 import numpy as np
 import torch.nn as nn
@@ -85,6 +86,14 @@ class local_trainer(pl.LightningModule):
 			prompts.reset_parameters()
 
 		find_param_nans(self.model)
+
+		self.prompts = getattr(self.model.model, "prompts", None)
+
+		# set debug
+		self.mem_probe = MemoryProbe(
+            out_dir=f"{args.output_dir}/mem_trace/mem_traces_task{task_id}")
+		
+
 		
 		self.task_id = task_id
 		self.lr = args.lr
@@ -111,7 +120,22 @@ class local_trainer(pl.LightningModule):
 		fh = logging.FileHandler(os.path.join(debug_dir, f"memory_debug_task{task_id}.log"))
 		fh.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
 		self._mem_logger.addHandler(fh)
+
+	def get_probe_status(self):
+		if self.prompts is None:
+			return False
+		return self.prompts.debug
 	
+	def set_probe_active(self, active: bool, debug_attribute: DebugAttribute = None):
+		if self.prompts is None:
+			return
+		
+		self.prompts.debug = active
+		
+		self.prompts.debug_probe = self.mem_probe if active else None
+		self.prompts.debug_attribute = debug_attribute if active else None
+		self.mem_probe.tag = debug_attribute.true_task_id if active else None
+
 	def forward(self, pixel_values, pixel_mask):
 		outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask)
 		return outputs
@@ -175,7 +199,8 @@ class local_trainer(pl.LightningModule):
 		if self.args.bg_thres and not return_outputs and self.args.use_prompts:
 			labels = self.BG_thresholding(results=results, labels=labels)
 
-		if class_wise and train:
+		# if class_wise and train:
+		if True:
 			raw_class_labels_batches = [label['class_labels'] for label in labels]
 			# print(f"Class labels: {class_labels}")
 			class_names_batches = []
@@ -186,9 +211,9 @@ class local_trainer(pl.LightningModule):
 
 			
 			prompts = self.model.model.prompts
-			if prompts is not None and isinstance(prompts, ClassWiseDynamicPrompt):
+			# if prompts is not None and isinstance(prompts, ClassWiseDynamicPrompt):
 
-				prompts.set_activate_classes(class_names_batches)
+			prompts.set_activate_classes(class_names_batches)
 
 			outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels, query=query, train=True, task_id=self.task_id)
 		else:
@@ -270,7 +295,8 @@ class local_trainer(pl.LightningModule):
 				if self.args.viz:
 					image_ids = self.evaluator.test_dataset.coco.getImgIds()
 					for id in image_ids[0:self.args.num_imgs_viz]:
-						self.evaluator.vizualize(id=id)
+						# self.evaluator.vizualize(id=id)
+						1
 
 		return loss
 	
@@ -503,7 +529,7 @@ class Evaluator():
 			else:
 				query = None
 
-			outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, query=query, train=False)
+			outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, query=query, train=False, task_id=self.task_id)
 
 			if self.args.mask_gradients:
 				outputs.logits[:,:, self.invalid_cls_logits] = -10e10
@@ -531,11 +557,16 @@ class Evaluator():
 			#print(image_ids[0:4])
 			for id in image_ids[0:self.args.num_imgs_viz]:
 				try:
-					self.vizualize()
+					# self.vizualize()
+					1
 				except:
 					continue
 
 	def vizualize(self, id=None, score_threshold=0.18, device='cuda'):
+		pre_prob_status = self.local_trainer.get_probe_status() if self.local_trainer else False
+		self.local_trainer.set_probe_active(False)
+
+
 		test_dataset = self.test_dataset
 		image_ids = test_dataset.coco.getImgIds()
 		
@@ -604,3 +635,5 @@ class Evaluator():
 				ax[i].set_axis_off()
 
 		plt.savefig(os.path.join(self.args.output_dir, f'{task}_img_{image_id}.jpg'), bbox_inches = 'tight',pad_inches = 0.1)
+
+		self.local_trainer.set_probe_active(pre_prob_status)

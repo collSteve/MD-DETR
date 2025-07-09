@@ -31,6 +31,7 @@ from torch.autograd.function import once_differentiable
 from models.memory.class_wise_dyn_memory import ClassWiseDynamicPrompt
 from models.memory.dyn_memory import DynamicPrompt
 from models.memory.experiment_prompt import ExperimentPrompt
+from models.memory.task_specific_memory import TaskSpecificMemory
 from .prompt import Prompt, PromptParam
 
 from transformers.activations import ACT2FN
@@ -1499,10 +1500,12 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             #                                                 e_p_length=config.prompt_len),
             #                         #  prompt_param=[config.num_prompts,config.prompt_len,0],
             #                          key_dim=config.d_model, args=config)
-            self.prompts = DynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
-                                         e_p_length=config.prompt_len, local_query=config.local_query)
-            # self.prompts = ClassWiseDynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=2, 
+            # self.prompts = DynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
+            #                              e_p_length=config.prompt_len, local_query=config.local_query)
+            # self.prompts = ClassWiseDynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=5, 
             #                                         e_p_length=config.prompt_len, local_query=config.local_query)
+            self.prompts = TaskSpecificMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
+                                         e_p_length=config.prompt_len, local_query=config.local_query)
 
         # Create input projection layers
         if config.num_feature_levels > 1:
@@ -1819,6 +1822,12 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         else:
             prompts = None
 
+        # print(f"encoder outputs: shape: {encoder_outputs.shape}, ")
+        # print(f"encoder outputs[0]: shape: {encoder_outputs[0].shape}, ")
+        # print(f"encoder outputs[0]: {encoder_outputs[0]}")
+
+        pdb.set_trace()
+
         decoder_outputs = self.decoder(
             inputs_embeds=target,
             position_embeddings=query_embed,
@@ -1843,6 +1852,9 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             tuple_outputs = (init_reference_points,) + decoder_outputs + encoder_outputs + enc_outputs
 
             return tuple_outputs
+
+        # print(f"decoder last hidden layer: shape: {decoder_outputs.last_hidden_state.shape}, ")
+        # print(f"decoder last hidden layer: {decoder_outputs.last_hidden_state}")
 
         return DeformableDetrModelOutput(
             init_reference_points=init_reference_points,
@@ -2005,7 +2017,18 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
         Detected cat with confidence 0.789 at location [342.19, 24.3, 640.02, 372.25]
         Detected remote with confidence 0.633 at location [40.79, 72.78, 176.76, 117.25]
         ```"""
+
+        # print(f"lables[:2]: {labels[:2]}")
+        # """
+        # lables[:2]: [{'size': tensor([1204,  800], device='cuda:0'), 'image_id': tensor([132548], device='cuda:0'), 'class_labels': tensor([18], device='cuda:0'), 'boxes': tensor([[0.9329, 0.8040, 0.1342, 0.1399]], device='cuda:0'), 'area': tensor([11578.4707], device='cuda:0'), 'iscrowd': tensor([0], device='cuda:0'), 'orig_size': tensor([500, 332], device='cuda:0')}]
+        # """
+
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        if labels is not None:
+            self.model.prompts.set_image_ids([label["image_id"] for label in labels])
+        else:
+            self.model.prompts.set_image_ids(None)
 
         # First, sent images through DETR base model to obtain encoder + decoder outputs
         outputs = self.model(

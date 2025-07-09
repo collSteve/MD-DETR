@@ -61,7 +61,8 @@ class TaskMemory(nn.Module):
 class DynamicPrompt(BasePromptModule):
     def __init__(self, emb_d, key_d, default_units, e_p_length, 
                  e_layers: Sequence[int] = [0,1,2,3,4,5], local_query: bool = False,
-                 ortho_mu=0.0):
+                 ortho_mu=0.0,
+                 debug=False, debug_probe=None):
         super().__init__()
         self.emb_d, self.key_d, self.e_p_length = emb_d, key_d, e_p_length
         self.ortho_mu = ortho_mu
@@ -81,6 +82,12 @@ class DynamicPrompt(BasePromptModule):
 
 
         self.task_count = 0 # not used
+
+        #debug
+        self.active_classes_batch = [] # for debug
+        self.debug = debug
+        self.debug_probe = debug_probe   # callable | None
+        self.debug_attribute = None  # for debug
     
     def reset_parameters(self):
         """
@@ -209,7 +216,27 @@ class DynamicPrompt(BasePromptModule):
         mid = self.e_p_length // 2
         Ek, Ev = P_[:, :mid, :], P_[:, mid:, :]
 
+        # debug
+        object_classes = self.active_classes_batch[0] # Only work for batchsize = 1; TODO
+
+        # print(f"image_ids: {self.image_ids[0]}")
+
+        if self.debug and self.debug_probe is not None:
+            self.debug_probe(
+                layer=l,
+                task_id=task_id,      # what engine believes
+                class_labels=object_classes,
+                # K_norm=nK.detach(),   # (U, D)
+                weights=weights.detach().cpu().clone(),  # (B, U)
+                P=P_.detach().cpu().clone(),        # (B, L, D)
+                true_task_id=self.debug_attribute.true_task_id if self.debug_attribute else None,
+                img_id=self.image_ids[0].cpu().clone().numpy()[0] if self.image_ids is not None else None, # TODO: handle batch size > 1
+            )
+
         return [Ek, Ev], 0, x_block
+    
+    def set_activate_classes(self, object_classes_batch: Sequence[Sequence[str]]):
+        self.active_classes_batch = object_classes_batch
 
 
 
