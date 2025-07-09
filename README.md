@@ -138,9 +138,18 @@ python run.py run.local=true experiment=train_with_promp_dyn_mem_always_quertf_l
 python run.py run.local=true experiment=train_with_promp_dyn_mem_local_query_0_no_queryft experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield
 
 
+python run.py run.local=true experiment=train_with_promp_dyn_mem_local_query_0_no_queryft experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield
+
+
 python run.py run.local=true experiment=validate_with_prompt_dyn_mem shared=shield
 
 python run.py run.local=true experiment=validate_with_prompt_dyn_mem_local experiment.checkpoint_dir=/home/kren04/shield/MD_DETR_runs/upload/checkpoints/Task_1 experiment.exp_name=test sbatch.gpus_per_node=1 shared=vision_lab
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_task_specific_memory
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/home/kren04/shield/MD_DETR_runs/upload/checkpoints/Task_1 sbatch.gpus_per_node=1 shared=vision_lab experiment.exp_name=train_proposal_query_memory
 
 ```
 

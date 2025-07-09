@@ -31,6 +31,7 @@ from torch.autograd.function import once_differentiable
 from models.memory.class_wise_dyn_memory import ClassWiseDynamicPrompt
 from models.memory.dyn_memory import DynamicPrompt
 from models.memory.experiment_prompt import ExperimentPrompt
+from models.memory.proposal_query_memory import ProposalQueryMemory
 from models.memory.task_specific_memory import TaskSpecificMemory
 from .prompt import Prompt, PromptParam
 
@@ -1504,8 +1505,10 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             #                              e_p_length=config.prompt_len, local_query=config.local_query)
             # self.prompts = ClassWiseDynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=5, 
             #                                         e_p_length=config.prompt_len, local_query=config.local_query)
-            self.prompts = TaskSpecificMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
-                                         e_p_length=config.prompt_len, local_query=config.local_query)
+            # self.prompts = TaskSpecificMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
+            #                              e_p_length=config.prompt_len, local_query=config.local_query)
+            self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
+                                            e_p_length=config.prompt_len, local_query=config.local_query)
 
         # Create input projection layers
         if config.num_feature_levels > 1:
@@ -1826,7 +1829,7 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         # print(f"encoder outputs[0]: shape: {encoder_outputs[0].shape}, ")
         # print(f"encoder outputs[0]: {encoder_outputs[0]}")
 
-        pdb.set_trace()
+        # pdb.set_trace()
 
         decoder_outputs = self.decoder(
             inputs_embeds=target,
@@ -2066,8 +2069,8 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
 
             outputs_class = self.class_embed[level](hidden_states[:, level])
 
-            if (torch.isnan(hidden_states[:, level]).any()):
-                pdb.set_trace()
+            # if (torch.isnan(hidden_states[:, level]).any()):
+            #     pdb.set_trace()
 
             delta_bbox = self.bbox_embed[level](hidden_states[:, level])
             if reference.shape[-1] == 4:

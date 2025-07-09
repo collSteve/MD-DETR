@@ -247,7 +247,7 @@ def main(args):
         if task_id == 1:
             args.epochs = 11
         else:
-            args.epochs = 8
+            args.epochs = 6
 
         #args.switch = True
         args.task = str(task_id)

@@ -2,10 +2,10 @@ from typing import Sequence
 import torch
 import torch.nn as nn
 
-from models.d_prompt import DynamicMemory
+from models.memory.dyn_memory import DynamicPrompt
 
 
-class TaskSpecificMemory(DynamicMemory):
+class TaskSpecificMemory(DynamicPrompt):
     """
     Different than Dynamic Memory, Each memory units in this class are only used for specific task;
     Memory Units are not shared in between tasks.
