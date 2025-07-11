@@ -59,6 +59,8 @@ from .load_custom import load_cuda_kernels
 
 logger = logging.get_logger(__name__)
 
+torch.set_printoptions(threshold=float("inf"))
+
 # Move this to not compile only when importing, this needs to happen later, like in __init__.
 if is_torch_cuda_available() and is_ninja_available():
     logger.info("Loading custom CUDA kernels...")
@@ -765,6 +767,7 @@ class DeformableDetrMultiheadAttention(nn.Module):
         position_embeddings: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
         prompt_list=None,
+        proposal_wise_prompt=True,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         """Input shape: Batch x Time x Channel"""
 
@@ -785,6 +788,8 @@ class DeformableDetrMultiheadAttention(nn.Module):
             pk, pv = prompt_list
             key_states = torch.cat((pk,key_states), dim=1)
             value_states = torch.cat((pv,value_states), dim=1)
+
+        # print(f"key_states: {key_states.size()}, value_states: {value_states.size()}")
 
         key_states = self._shape(key_states, -1, batch_size)
         value_states = self._shape(value_states, -1, batch_size)
@@ -816,6 +821,39 @@ class DeformableDetrMultiheadAttention(nn.Module):
                     f" {attention_mask.size()}"
                 )
             attn_weights = attn_weights.view(batch_size, self.num_heads, target_len, source_len) + attention_mask
+            attn_weights = attn_weights.view(batch_size * self.num_heads, target_len, source_len)
+
+        if prompt_list is not None and proposal_wise_prompt:
+            # source_len = N + N *l [original object queries + l prompts per object query]
+            # target_len = N [original object queries]
+            # l_per_query = ((N + N *l) - N) / N
+            l_per_query = (source_len - target_len) // target_len
+
+            device = attn_weights.device
+            dtype  = attn_weights.dtype
+
+            # build a (target_len, source_len) boolean mask: True = keep, False = block
+            mask2d = torch.zeros((target_len, source_len), device=device, dtype=torch.bool)
+            mask2d[:, :target_len] = True   #  allow original object-query to object-query
+
+            #  for each query i, allow exactly its own l_per_query prompts
+            for i in range(target_len):
+                start = target_len + i * l_per_query
+                end   = start + l_per_query
+                mask2d[i, start:end] = True
+
+            # turn bool mask into a “-inf mask” of shape (1,1,tgt_len,src_len)
+            neg_inf = torch.finfo(dtype).min
+            float_mask = torch.full((target_len, source_len), neg_inf, device=device, dtype=dtype)
+            float_mask[mask2d] = 0.0
+            mask4d = float_mask.unsqueeze(0).unsqueeze(0)   # (1,1,tgt_len,src_len)
+
+            # print(f"[Using prompt attention mask]: {mask4d}")
+
+
+            # add it onto raw attn_logits, broadcasting over batch & heads
+            attn_weights = attn_weights.view(batch_size, self.num_heads, target_len, source_len)
+            attn_weights = attn_weights + mask4d
             attn_weights = attn_weights.view(batch_size * self.num_heads, target_len, source_len)
 
         attn_weights = nn.functional.softmax(attn_weights, dim=-1)
@@ -998,6 +1036,7 @@ class DeformableDetrDecoderLayer(nn.Module):
         residual = hidden_states
 
         # Self Attention
+        # print(f"DecoderLayer self attenttion:")
         hidden_states, self_attn_weights = self.self_attn(
             hidden_states=hidden_states,
             position_embeddings=position_embeddings,
@@ -1014,6 +1053,8 @@ class DeformableDetrDecoderLayer(nn.Module):
 
         # Cross-Attention
         cross_attn_weights = None
+        # print(f"DecoderLayer cross attenttion:")
+
         hidden_states, cross_attn_weights = self.encoder_attn(
             hidden_states=hidden_states,
             attention_mask=encoder_attention_mask,
