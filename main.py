@@ -209,6 +209,8 @@ def get_args_parser():
     parser.add_argument('--big_pretrained', default="", type=str, 
                         help='Path to a larger pretrained model for initialization')
     
+    parser.add_argument('--record_probes', action='store_true', help="Enable probe recording during evaluation")
+    
     return parser
 
 def main(args):
@@ -245,9 +247,9 @@ def main(args):
         print('Logging: args ', args, file=args.log_file)
 
         if task_id == 1:
-            args.epochs = 11
+            args.epochs = 10
         else:
-            args.epochs = 6
+            args.epochs = 10
 
         #args.switch = True
         args.task = str(task_id)
@@ -307,7 +309,7 @@ def main(args):
             else:
                 prev_task = args.checkpoint_dir.replace('Task_1','Task_'+str(task_id))
             
-            if task_id == 1:
+            if not args.eval and task_id == 2:
                 trainer.resume(os.path.join(prev_task,args.checkpoint_base))
             else:
                 trainer.resume(os.path.join(prev_task,args.checkpoint_next))
@@ -322,9 +324,11 @@ def main(args):
         ####################### Training/Evaluating on Current classes ################################################
         if args.eval:
             trainer.evaluator.local_eval = 1
-            # trainer.set_probe_active(True, debug_attribute=DebugAttribute(true_task_id="cur"))
+            if args.record_probes:
+                trainer.set_probe_active(True, debug_attribute=DebugAttribute(true_task_id="cur"))
             pyl_trainer.validate(trainer, test_dataloader)
-            # trainer.set_probe_active(False)
+            if args.record_probes:
+                trainer.set_probe_active(False)
         else:
             pyl_trainer.fit(trainer, train_dataloader, test_dataloader)
         #############################################################################################################
@@ -358,11 +362,13 @@ def main(args):
             trainer.evaluator.model = trainer.model
             trainer.eval_mode = True
 
-            # trainer.set_probe_active(True, debug_attribute=DebugAttribute(true_task_id="prev"))
+            if args.record_probes:
+                trainer.set_probe_active(True, debug_attribute=DebugAttribute(true_task_id="prev"))
 
             pyl_trainer.validate(trainer,test_dataloader_prev)
 
-            # trainer.set_probe_active(False)
+            if args.record_probes:
+                trainer.set_probe_active(False)
 
             ##########################################################################################################
 
