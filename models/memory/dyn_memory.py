@@ -217,11 +217,12 @@ class DynamicPrompt(BasePromptModule):
         Ek, Ev = P_[:, :mid, :], P_[:, mid:, :]
 
         # debug
-        object_classes = self.active_classes_batch[0] # Only work for batchsize = 1; TODO
 
         # print(f"image_ids: {self.image_ids[0]}")
 
         if self.debug and self.debug_probe is not None:
+            object_classes = self.active_classes_batch[0] # Only work for batchsize = 1; TODO
+
             self.debug_probe(
                 layer=l,
                 task_id=task_id,      # what engine believes

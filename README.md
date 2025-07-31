@@ -151,10 +151,60 @@ python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_
 
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/home/kren04/shield/MD_DETR_runs/upload/checkpoints/Task_1 sbatch.gpus_per_node=1 shared=vision_lab experiment.exp_name=train_proposal_query_memory
 
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_2_l_10_mem_units_ECHO_10 experiment.start_task=2 experiment.checkpoint_next="checkpoint09.pth"
+
+
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dynamic_memory_correctness_2
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dynamic_memory_correctness_from_2 experiment.start_task=2 experiment.checkpoint_base="checkpoint05.pth" 
+
+
+
+# proposal query memory:
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_l_2_mem_units_20_ECHO_10 experiment.checkpoint_base="checkpoint09.pth" experiment.checkpoint_next="checkpoint09.pth"
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_l_2_mem_units_10_ECHO_t1_11_t234_10_correctness experiment.checkpoint_base="checkpoint10.pth" experiment.checkpoint_next="checkpoint09.pth"
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_l_2_output_bias_mem_units_20_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"  experiment.start_task=4 experiment.n_tasks=4
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_l_2_input_bias_mem_units_20_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"  experiment.start_task=4 experiment.n_tasks=4
+
+## validate and record:
+python run.py run.local=true experiment=validate_with_prompt shared=shield experiment.exp_name=validate_proposal_query_memory_l2_mem_u10_11.10_recorded experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_proposal_query_memory_l_2_mem_units_10_ECHO_t1_11_t234_10_correctness/Task_1 experiment.checkpoint_next="checkpoint09.pth" experiment.checkpoint_base="checkpoint10.pth" experiment.record_probes=true
+
+python run.py run.local=true experiment=validate_with_prompt shared=shield experiment.exp_name=validate_proposal_query_memory_l2_mem_u10_11.10_recorded experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_proposal_query_memory_l_2_mem_units_10_ECHO_t1_11_t234_10_correctness/Task_1 experiment.checkpoint_next="checkpoint09.pth" experiment.checkpoint_base="checkpoint10.pth" experiment.record_probes=true
+
 ```
 
 ```python
 visualize_weights_by_class_aggregated_advanced(p, save_path="/h/stevev/MD_DETR_runs/validate_with_prompt_hydra_3/t1_class.png", limit_classes=[0,1,2,3,4], line_visual=["mean"], area_visual=["std"], alpha=0.3)
 
 visualize_weights_by_class_aggregated_advanced(p, save_path="/h/stevev/MD_DETR_runs/validate_with_prompt_hydra_3/t2_5_class.png", limit_classes=list(range(0, 39, 5)), line_visual=["mean"], area_visual=["std"], alpha=0.3)
+```
+
+
+```
+python -m analysis.distribution_analysis --base_dir /home/kren04/shield/MD_DETR_runs/validate_with_prompt_dyn_mem_debug_mode_with_img_id --memory_map "25,25,25,25" --no-log-scale
+
+```
+
+### New Weight Analysis:
+Here are some examples of how you can run it:
+
+1. Default Behavior (as before): Color by Task, Sort by Raw Value, Log Scale
+
+```
+python -m analysis.distribution_analysis --base_dir <your_exp_dir> --memory_map "10,10,10,10"
+```
+
+2. Color by Task, Sort by ABSOLUTE Value, Log Scale
+```
+python -m analysis.distribution_analysis --base_dir <your_exp_dir> --memory_map "10,10,10,10" --sort_by_abs
+```
+
+3. Color by Memory INDEX, Sort by Raw Value, Linear Scale
+
+```
+python -m analysis.distribution_analysis --base_dir <your_exp_dir> --color_by index --no-log-scale --run_name "Experiment_B_Results"
 ```

@@ -211,7 +211,10 @@ class local_trainer(pl.LightningModule):
 
 			
 			prompts = self.model.model.prompts
-			# if prompts is not None and isinstance(prompts, ClassWiseDynamicPrompt):
+			# Pass batch metadata to the prompt module so it can be used for recording
+			if hasattr(prompts, 'set_batch_metadata'):
+				img_ids = [l['image_id'].item() for l in labels]
+				prompts.set_batch_metadata(img_ids=img_ids, class_labels=class_names_batches)
 
 			prompts.set_activate_classes(class_names_batches)
 
@@ -292,11 +295,10 @@ class local_trainer(pl.LightningModule):
 			if self.trainer.global_rank == 0:
 				self.evaluator.print_coco_stats(self.current_epoch, stats, self.print_count)
 				self.print_count = 1
-				if self.args.viz:
+				if self.args.viz and not self.evaluator.record_probes:
 					image_ids = self.evaluator.test_dataset.coco.getImgIds()
 					for id in image_ids[0:self.args.num_imgs_viz]:
-						# self.evaluator.vizualize(id=id)
-						1
+						self.evaluator.vizualize(id=id)
 
 		return loss
 	
@@ -415,6 +417,7 @@ class Evaluator():
 		self.coco_evaluator = coco_evaluator
 		self.task_label2name = task_label2name
 		self.args = args
+		self.record_probes = args.record_probes
 		self.local_eval = local_eval
 		self.task_id = task_id
 		self.task_name = task_name
@@ -552,13 +555,12 @@ class Evaluator():
 		elif self.local_trainer.trainer.global_rank == 0:
 			self.print_coco_stats(epoch=args.epochs+1, stats=coco_evaluator.coco_eval[args.iou_types[0]].stats, print_count=1)
 
-		if args.viz:
+		if args.viz and not self.record_probes:
 			image_ids = self.test_dataset.coco.getImgIds()
 			#print(image_ids[0:4])
 			for id in image_ids[0:self.args.num_imgs_viz]:
 				try:
-					# self.vizualize()
-					1
+					self.vizualize(id=id)
 				except:
 					continue
 

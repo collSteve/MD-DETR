@@ -9,7 +9,7 @@ split_point:           0
 n_tasks:               4
 
 checkpoint_dir:      /h/stevev/MD_DETR_runs/upload/checkpoints/Task_1
-checkpoint_base:     checkpoint10.pth
+checkpoint_base:     checkpoint05.pth
 checkpoint_next:     checkpoint05.pth
 
 lr:                  1e-4
@@ -28,3 +28,4 @@ start_task: 1
 resume: 0
 
 local_query: 1
+record_probes: false

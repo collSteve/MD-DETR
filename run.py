@@ -42,6 +42,9 @@ def main(cfg: DictConfig):
     if cfg.experiment.viz:
         common.append(cfg.experiment.viz)
 
+    if cfg.experiment.record_probes:
+        common.append("--record_probes")
+
     if cfg.experiment.train:
         mode = [
             "--epochs",         str(cfg.experiment.epochs),

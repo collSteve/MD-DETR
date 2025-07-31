@@ -247,9 +247,9 @@ def main(args):
         print('Logging: args ', args, file=args.log_file)
 
         if task_id == 1:
-            args.epochs = 10
+            args.epochs = 6
         else:
-            args.epochs = 10
+            args.epochs = 6
 
         #args.switch = True
         args.task = str(task_id)
@@ -283,6 +283,9 @@ def main(args):
         trainer = local_trainer(train_loader=train_dataloader,val_loader=test_dataloader,
                                       test_dataset=test_dataset,args=args,local_evaluator=local_evaluator,task_id=task_id)
         
+        # THE FIX: Establish the back-reference from the evaluator to the trainer.
+        trainer.evaluator.local_trainer = trainer
+
         pyl_trainer.callbacks.append(trainer.mem_probe)
 
         # if args.use_prompts:

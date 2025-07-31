@@ -767,24 +767,42 @@ class DeformableDetrMultiheadAttention(nn.Module):
         position_embeddings: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
         prompt_list=None,
-        proposal_wise_prompt=True,
+        prefix_tuning: bool = False,
+        proposal_masking=False,
+        prompt_as_input_bias: bool = True,
+        prompt_as_query_bias: bool = False,
+        prompt_as_addition_bias = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         """Input shape: Batch x Time x Channel"""
+
+        if prompt_as_query_bias and prompt_as_input_bias:
+            raise ValueError("Cannot use both query_bias and input_bias at once")
 
         batch_size, target_len, embed_dim = hidden_states.size()
         # add position embeddings to the hidden states before projecting to queries and keys
         if position_embeddings is not None:
             hidden_states_original = hidden_states
             hidden_states = self.with_pos_embed(hidden_states, position_embeddings)
+
+        if prompt_list is not None and prompt_as_input_bias:
+            pk, _ = prompt_list
+            # pk has shape (B, N, D) when T_p=1
+            hidden_states = hidden_states + pk
         
         # get queries, keys and values
         query_states = self.q_proj(hidden_states) * self.scaling
+
+        if prompt_list is not None and prompt_as_query_bias:
+            pk, _ = prompt_list
+            # pk has shape (B, N, D) when T_p=1
+            query_states = query_states + pk
 
         key_states = self.k_proj(hidden_states)
 
         value_states = self.v_proj(hidden_states_original)
 
-        if prompt_list is not None:
+        # prefix tuning
+        if prompt_list is not None and prefix_tuning:
             pk, pv = prompt_list
             key_states = torch.cat((pk,key_states), dim=1)
             value_states = torch.cat((pv,value_states), dim=1)
@@ -823,7 +841,7 @@ class DeformableDetrMultiheadAttention(nn.Module):
             attn_weights = attn_weights.view(batch_size, self.num_heads, target_len, source_len) + attention_mask
             attn_weights = attn_weights.view(batch_size * self.num_heads, target_len, source_len)
 
-        if prompt_list is not None and proposal_wise_prompt:
+        if prompt_list is not None and proposal_masking:
             # source_len = N + N *l [original object queries + l prompts per object query]
             # target_len = N [original object queries]
             # l_per_query = ((N + N *l) - N) / N
@@ -843,7 +861,8 @@ class DeformableDetrMultiheadAttention(nn.Module):
                 mask2d[i, start:end] = True
 
             # turn bool mask into a “-inf mask” of shape (1,1,tgt_len,src_len)
-            neg_inf = torch.finfo(dtype).min
+            # neg_inf = torch.finfo(dtype).min
+            neg_inf = -1e9 if dtype == torch.float32 else -1e4
             float_mask = torch.full((target_len, source_len), neg_inf, device=device, dtype=dtype)
             float_mask[mask2d] = 0.0
             mask4d = float_mask.unsqueeze(0).unsqueeze(0)   # (1,1,tgt_len,src_len)
@@ -883,6 +902,13 @@ class DeformableDetrMultiheadAttention(nn.Module):
         attn_output = attn_output.reshape(batch_size, target_len, embed_dim)
 
         attn_output = self.out_proj(attn_output)
+
+        # addition‐bias
+        if prompt_list is not None and prompt_as_addition_bias:
+            # TODO: currently ignore pk; just use pv as a learned bias
+            _, pv = prompt_list
+            # TODO: pv: (B, target_len, embed_dim) since assuming T_p=1
+            attn_output = attn_output + pv
 
         return attn_output, attn_weights_reshaped
 
@@ -1548,8 +1574,10 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             #                                         e_p_length=config.prompt_len, local_query=config.local_query)
             # self.prompts = TaskSpecificMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
             #                              e_p_length=config.prompt_len, local_query=config.local_query)
-            self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
-                                            e_p_length=config.prompt_len, local_query=config.local_query)
+            # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
+            #                                 e_p_length=config.prompt_len, local_query=config.local_query)
+            self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=20, 
+                                            e_p_length=2, local_query=config.local_query)
 
         # Create input projection layers
         if config.num_feature_levels > 1:

@@ -16,6 +16,18 @@ class MemoryRecord:
     true_task_id: str | None = None
 
 @dataclass
+class ProposalMemoryRecord:
+    """A raw record for proposal-based memory, storing the full N-dimensional tensors."""
+    epoch: int
+    img_id: int         
+    task_id: int
+    layer: int
+    weights: torch.Tensor # Shape: (B, N, U)
+    P: torch.Tensor       # Shape: (B, N, L, D)
+    class_labels: list[str]
+    true_task_id: str | None = None
+
+@dataclass
 class ProcessedMemRecord(MemoryRecord):
     weights: torch.Tensor # (U) only
     P: torch.Tensor       # no batch dim
@@ -32,25 +44,10 @@ class MemoryProbe(pl.Callback):
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.max_in_ram = max_in_ram
 
-    # called by DynamicPrompt
-    def __call__(self, **kwargs):
-        # limit amount stored per batch to save RAM
-        rec = MemoryRecord(
-            epoch=self._epoch,
-            img_id=kwargs.get("img_id", -1),
-            task_id=kwargs.get("task_id", -1),
-            layer=kwargs["layer"],
-            # K_norm=kwargs["K_norm"].cpu().clone(),
-            weights=kwargs["weights"].cpu().clone(),
-            P=kwargs["P"].cpu().clone(),
-            class_labels=kwargs.get("class_labels", []),
-            true_task_id=kwargs.get("true_task_id", None),
-        )
-        self.records.append(rec)
-
-
-        # if len(self.records) >= self.max_in_ram:
-        #     self._flush()
+    # called by the prompt modules
+    def __call__(self, record):
+        """Accepts either a MemoryRecord or a ProposalMemoryRecord."""
+        self.records.append(record)
 
     # Lightning hook
     def on_validation_start(self, trainer, pl_module):
@@ -66,8 +63,11 @@ class MemoryProbe(pl.Callback):
         if not self.records:
             return
         
-        fname = self.out_dir / f"mem_epoch{self._epoch:03d}_tag{self.tag}_rank{self.rank}.pkl"
+        # Use a different filename for proposal records to easily distinguish them.
+        is_proposal_data = isinstance(self.records[0], ProposalMemoryRecord)
+        prefix = "prop_mem" if is_proposal_data else "mem"
+        
+        fname = self.out_dir / f"{prefix}_epoch{self._epoch:03d}_tag{self.tag}_rank{self.rank}.pkl"
         with fname.open("wb") as f:
             pickle.dump(copy.deepcopy(self.records), f)
         self.records.clear()
-
