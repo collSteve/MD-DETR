@@ -767,9 +767,9 @@ class DeformableDetrMultiheadAttention(nn.Module):
         position_embeddings: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
         prompt_list=None,
-        prefix_tuning: bool = False,
+        prefix_tuning: bool = True,
         proposal_masking=False,
-        prompt_as_input_bias: bool = True,
+        prompt_as_input_bias: bool = False,
         prompt_as_query_bias: bool = False,
         prompt_as_addition_bias = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
@@ -1568,16 +1568,16 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             #                                                 e_p_length=config.prompt_len),
             #                         #  prompt_param=[config.num_prompts,config.prompt_len,0],
             #                          key_dim=config.d_model, args=config)
-            # self.prompts = DynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
-            #                              e_p_length=config.prompt_len, local_query=config.local_query)
+            self.prompts = DynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
+                                         e_p_length=config.prompt_len, local_query=config.local_query)
             # self.prompts = ClassWiseDynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=5, 
             #                                         e_p_length=config.prompt_len, local_query=config.local_query)
             # self.prompts = TaskSpecificMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
             #                              e_p_length=config.prompt_len, local_query=config.local_query)
             # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
             #                                 e_p_length=config.prompt_len, local_query=config.local_query)
-            self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=20, 
-                                            e_p_length=2, local_query=config.local_query)
+            # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=20, 
+            #                                 e_p_length=2, local_query=config.local_query)
 
         # Create input projection layers
         if config.num_feature_levels > 1:

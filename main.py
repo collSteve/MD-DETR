@@ -196,6 +196,8 @@ def get_args_parser():
                         help='Directory for task annotations')
     parser.add_argument('--split_point', default=0, type=int, 
                         help='Point to split training data for task setup')
+    parser.add_argument('--task_order', default=None, type=int, nargs='+',
+                        help='A custom order of tasks to run, e.g. 1 2 4 3')
 
     # Bounding box thresholds
     parser.add_argument('--bbox_thresh', default=0.3, type=float, 
@@ -226,7 +228,24 @@ def main(args):
     args.iou_types = ['bbox']
     out_dir_root = args.output_dir
     
-    args.task_map, args.task_label2name =  task_info_coco(split_point=args.split_point)
+    # Get the canonical task map
+    canonical_task_map, args.task_label2name =  task_info_coco(split_point=args.split_point)
+    
+    # If a custom task order is provided, remap the canonical task map
+    if args.task_order:
+        print(f"Received custom task order: {args.task_order}")
+        if sorted(args.task_order) != list(range(1, len(canonical_task_map) + 1)):
+            raise ValueError(f"Task order must be a permutation of {list(range(1, len(canonical_task_map) + 1))}")
+        
+        reordered_task_map = {new_task_id: canonical_task_map[original_task_id] 
+                              for new_task_id, original_task_id in enumerate(args.task_order, 1)}
+        args.task_map = reordered_task_map
+        print("Using reordered task map:")
+        for k, v in args.task_map.items():
+            # Printing only the class count for brevity
+            print(f"  Task {k}: {len(v[0])} classes, starting at offset {v[1]}")
+    else:
+        args.task_map = canonical_task_map
     # print(args.task_map)
     # print(args.task_label2name)
     args.task_label2name[args.n_classes-1] = "BG"
@@ -247,7 +266,7 @@ def main(args):
         print('Logging: args ', args, file=args.log_file)
 
         if task_id == 1:
-            args.epochs = 6
+            args.epochs = 10
         else:
             args.epochs = 6
 

@@ -168,7 +168,13 @@ python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_
 
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_l_2_output_bias_mem_units_20_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"  experiment.start_task=4 experiment.n_tasks=4
 
-python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_l_2_input_bias_mem_units_20_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"  experiment.start_task=4 experiment.n_tasks=4
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 experiment.task_ann_dir=/home/kren04/shield/MD_DETR_runs/upload/mscoco_reordered/order_1_2_4_3 shared=shield experiment.exp_name=train_proposal_query_mem_u_20_epoch_10_mem_order_1243_debug experiment.checkpoint_base="checkpoint09.pth" experiment.checkpoint_next="checkpoint09.pth"
+
+## reorder:
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared.task_ann_root=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/mscoco_reordered experiment.split_point=order_1_2_4_3 shared=shield experiment.exp_name=train_proposal_query_mem_u_20_epoch_10_mem_order_1243_debug experiment.checkpoint_base="checkpoint09.pth" experiment.checkpoint_next="checkpoint09.pth"
+
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared.task_ann_root=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/mscoco_reordered experiment.split_point=order_1_2_4_3 shared=shield experiment.exp_name=train_dynamic_memory_epoch_10_6_6_6_mem_order_1243_debug experiment.checkpoint_base="checkpoint09.pth" 
 
 ## validate and record:
 python run.py run.local=true experiment=validate_with_prompt shared=shield experiment.exp_name=validate_proposal_query_memory_l2_mem_u10_11.10_recorded experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_proposal_query_memory_l_2_mem_units_10_ECHO_t1_11_t234_10_correctness/Task_1 experiment.checkpoint_next="checkpoint09.pth" experiment.checkpoint_base="checkpoint10.pth" experiment.record_probes=true
