@@ -9,7 +9,7 @@ split_point:           0
 n_tasks:               4
 
 checkpoint_dir:      /h/stevev/MD_DETR_runs/upload/checkpoints/Task_1
-checkpoint_base:     checkpoint10.pth
+checkpoint_base:     checkpoint05.pth
 checkpoint_next:     checkpoint05.pth
 
 lr:                  1e-4
@@ -23,3 +23,18 @@ repo_name:           SenseTime/deformable-detr
 freeze:              backbone,encoder,decoder
 new_params:          class_embed,prompts
 viz:                 --viz
+
+start_task: 1
+resume: 0
+
+local_query: 1
+record_probes: false
+
+# --- CORRESPONDENCE EMBEDDING FLAGS ---
+# Use new learnable correspondence embeddings
+use_correspondence_embedding: false
+# Use existing positional embeddings for correspondence
+use_positional_embedding_for_correspondence: false
+
+# --- DUAL MEMORY MODEL FLAG ---
+use_dual_memory_model: false

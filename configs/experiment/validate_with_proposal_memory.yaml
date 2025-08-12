@@ -1,0 +1,17 @@
+# This configuration is for running validation on a model
+# that has been manually updated to use ProposalQueryMemory.
+
+defaults:
+  - _base
+
+exp_name:        validate_with_proposal_memory
+train:           0
+
+# Ensure prompts are enabled, as ProposalQueryMemory is a prompt module.
+use_prompts:     1
+
+# These are standard validation settings
+batch_size:      1
+epochs:          1
+save_epochs:     1
+eval_epochs:     1

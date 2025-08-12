@@ -13,7 +13,9 @@ import pdb
 from torch.utils.data import DataLoader
 from datetime import timedelta
 
+from models.memory.dyn_memory import DynamicPrompt
 from models.memory.experiment_prompt import ExperimentPrompt
+from models.probes.memory_probe import DebugAttribute
 import utils
 import pytorch_lightning as pl
 from datasets.coco_eval import CocoEvaluator
@@ -136,7 +138,7 @@ def get_args_parser():
                         help='Directory to save outputs')
     parser.add_argument('--device', default='cuda', 
                         help='Device for training (default is CUDA)')
-    parser.add_argument('--seed', default=42, type=int, 
+    parser.add_argument('--seed', default=43, type=int, 
                         help='Random seed')
     parser.add_argument('--resume', default=0, type=int, 
                         help='Resume training from a specific checkpoint')
@@ -194,6 +196,8 @@ def get_args_parser():
                         help='Directory for task annotations')
     parser.add_argument('--split_point', default=0, type=int, 
                         help='Point to split training data for task setup')
+    parser.add_argument('--task_order', default=None, type=int, nargs='+',
+                        help='A custom order of tasks to run, e.g. 1 2 4 3')
 
     # Bounding box thresholds
     parser.add_argument('--bbox_thresh', default=0.3, type=float, 
@@ -207,6 +211,18 @@ def get_args_parser():
     parser.add_argument('--big_pretrained', default="", type=str, 
                         help='Path to a larger pretrained model for initialization')
     
+    parser.add_argument('--record_probes', action='store_true', help="Enable probe recording during evaluation")
+
+    # Correspondence embedding flags
+    parser.add_argument('--use_correspondence_embedding', action='store_true',
+                        help="Use new learnable correspondence embeddings (Approach A)")
+    parser.add_argument('--use_positional_embedding_for_correspondence', action='store_true',
+                        help="Use existing positional embeddings for correspondence (Approach B)")
+    
+    # Dual memory model flag
+    parser.add_argument('--use_dual_memory_model', action='store_true',
+                        help="Use the experimental dual memory model.")
+
     return parser
 
 def main(args):
@@ -222,7 +238,41 @@ def main(args):
     args.iou_types = ['bbox']
     out_dir_root = args.output_dir
     
-    args.task_map, args.task_label2name =  task_info_coco(split_point=args.split_point)
+    # Get the canonical task map
+    canonical_task_map, canonical_label2name =  task_info_coco(split_point=args.split_point)
+    
+    # If a custom task order is provided, reconstruct the task_map and task_label2name
+    # to ensure class IDs are contiguous according to the new order.
+    if args.task_order:
+        print(f"Received custom task order: {args.task_order}")
+        if sorted(args.task_order) != list(range(1, len(canonical_task_map) + 1)):
+            raise ValueError(f"Task order must be a permutation of {list(range(1, len(canonical_task_map) + 1))}")
+        
+        reordered_task_map = {}
+        reordered_label2name = {}
+        all_reordered_classes = []
+        current_offset = 0
+
+        for new_task_id, original_task_id in enumerate(args.task_order, 1):
+            class_names, _, class_count = canonical_task_map[original_task_id]
+            reordered_task_map[new_task_id] = (class_names, current_offset, class_count)
+            all_reordered_classes.extend(class_names)
+            current_offset += class_count
+        
+        for i, class_name in enumerate(all_reordered_classes):
+            reordered_label2name[i] = class_name
+
+        args.task_map = reordered_task_map
+        args.task_label2name = reordered_label2name
+        
+        print("Using reordered task map and labels:")
+        for k, v in args.task_map.items():
+            print(f"  Task {k}: {len(v[0])} classes, starting at offset {v[1]}")
+    else:
+        # Default behavior
+        args.task_map = canonical_task_map
+        args.task_label2name = canonical_label2name
+
     args.task_label2name[args.n_classes-1] = "BG"
 
     if args.repo_name:
@@ -241,7 +291,7 @@ def main(args):
         print('Logging: args ', args, file=args.log_file)
 
         if task_id == 1:
-            args.epochs = 11
+            args.epochs = 6
         else:
             args.epochs = 6
 
@@ -252,7 +302,8 @@ def main(args):
         pyl_trainer = pl.Trainer(devices=list(range(args.n_gpus)), accelerator="gpu", max_epochs=args.epochs, 
                     gradient_clip_val=0.1, accumulate_grad_batches=int(32/(args.n_gpus*args.batch_size)), \
                     check_val_every_n_epoch=args.eval_epochs, callbacks=[checkpoint_callback],
-                    log_every_n_steps=args.print_freq, logger=logger, num_sanity_val_steps=0)
+                    log_every_n_steps=args.print_freq, logger=logger, num_sanity_val_steps=0,
+                    strategy="ddp_find_unused_parameters_true")
         
         tr_ann = os.path.join(args.task_ann_dir,'train_task_'+str(task_id)+'.json')
         tst_ann = os.path.join(args.task_ann_dir,'test_task_'+str(task_id)+'.json')
@@ -276,10 +327,23 @@ def main(args):
         trainer = local_trainer(train_loader=train_dataloader,val_loader=test_dataloader,
                                       test_dataset=test_dataset,args=args,local_evaluator=local_evaluator,task_id=task_id)
         
-        if args.use_prompts:
-            print ('previous task : ', trainer.model.model.prompts.task_count, file=args.log_file)
-            trainer.model.model.prompts.set_task_id(task_id-1)
-            print ('current task : ', trainer.model.model.prompts.task_count, file=args.log_file)
+        # THE FIX: Establish the back-reference from the evaluator to the trainer.
+        trainer.evaluator.local_trainer = trainer
+
+        pyl_trainer.callbacks.append(trainer.mem_probe)
+
+        # if args.use_prompts:
+        #     prompts = trainer.model.model.prompts
+
+        #     prompts.set_task_id(task_id - 1)
+
+        #     if isinstance(prompts, DynamicPrompt):
+        #         prompts.initialize_for_task(task_id)
+                    
+        # if args.use_prompts:
+        #     print ('previous task : ', trainer.model.model.prompts.task_count, file=args.log_file)
+        #     trainer.model.model.prompts.set_task_id(task_id-1)
+        #     print ('current task : ', trainer.model.model.prompts.task_count, file=args.log_file)
 
         if task_id>1:
             if not args.eval:
@@ -288,10 +352,11 @@ def main(args):
                     args.resume=0
                 else:
                     prev_task = args.output_dir.replace('Task_'+str(task_id),'Task_'+str(task_id-1))
+                    # prev_task = args.output_dir
             else:
                 prev_task = args.checkpoint_dir.replace('Task_1','Task_'+str(task_id))
             
-            if task_id == args.start_task:
+            if not args.eval and task_id == 2:
                 trainer.resume(os.path.join(prev_task,args.checkpoint_base))
             else:
                 trainer.resume(os.path.join(prev_task,args.checkpoint_next))
@@ -306,7 +371,11 @@ def main(args):
         ####################### Training/Evaluating on Current classes ################################################
         if args.eval:
             trainer.evaluator.local_eval = 1
-            pyl_trainer.validate(trainer,test_dataloader)
+            if args.record_probes:
+                trainer.set_probe_active(True, debug_attribute=DebugAttribute(true_task_id="cur"))
+            pyl_trainer.validate(trainer, test_dataloader)
+            if args.record_probes:
+                trainer.set_probe_active(False)
         else:
             pyl_trainer.fit(trainer, train_dataloader, test_dataloader)
         #############################################################################################################
@@ -314,6 +383,7 @@ def main(args):
         if task_id>1:
 
             ####################### Evaluating on previous classes ###################################################
+
             prev_task_ids = ''.join(str(i) for i in range(1,task_id))
             tst_ann_prev = os.path.join(args.task_ann_dir,'test_task_'+str(prev_task_ids)+'.json')
             test_dataset_prev = CocoDetection(img_folder=args.test_img_dir, 
@@ -338,7 +408,15 @@ def main(args):
             trainer.evaluator = local_evaluator
             trainer.evaluator.model = trainer.model
             trainer.eval_mode = True
+
+            if args.record_probes:
+                trainer.set_probe_active(True, debug_attribute=DebugAttribute(true_task_id="prev"))
+
             pyl_trainer.validate(trainer,test_dataloader_prev)
+
+            if args.record_probes:
+                trainer.set_probe_active(False)
+
             ##########################################################################################################
 
             ####################### Evaluating on all known classes ###################################################

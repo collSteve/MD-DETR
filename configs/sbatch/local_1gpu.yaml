@@ -1,3 +1,3 @@
 nodes:            1
-gpus_per_node:    1
+gpus_per_node:    8
 gpu_type:         local

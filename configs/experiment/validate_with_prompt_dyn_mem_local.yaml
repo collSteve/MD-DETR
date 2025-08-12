@@ -1,0 +1,16 @@
+defaults:
+  - _base
+
+exp_name:        test
+train:           0
+
+use_prompts:     1
+
+batch_size:      1
+epochs:          16
+save_epochs:     5
+eval_epochs:     2
+
+checkpoint_dir:      /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_with_promp_dyn_mem_new/Task_1
+checkpoint_base:     checkpoint10.pth
+checkpoint_next:     checkpoint05.pth

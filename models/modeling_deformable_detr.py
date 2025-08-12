@@ -28,7 +28,11 @@ from torch import Tensor, nn
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 
+from models.memory.class_wise_dyn_memory import ClassWiseDynamicPrompt
+from models.memory.dyn_memory import DynamicPrompt
 from models.memory.experiment_prompt import ExperimentPrompt
+from models.memory.proposal_query_memory import ProposalQueryMemory
+from models.memory.task_specific_memory import TaskSpecificMemory
 from .prompt import Prompt, PromptParam
 
 from transformers.activations import ACT2FN
@@ -54,6 +58,8 @@ from .load_custom import load_cuda_kernels
 
 
 logger = logging.get_logger(__name__)
+
+torch.set_printoptions(threshold=float("inf"))
 
 # Move this to not compile only when importing, this needs to happen later, like in __init__.
 if is_torch_cuda_available() and is_ninja_available():
@@ -726,6 +732,7 @@ class DeformableDetrMultiheadAttention(nn.Module):
 
     def __init__(
         self,
+        config: DeformableDetrConfig,
         embed_dim: int,
         num_heads: int,
         dropout: float = 0.0,
@@ -733,6 +740,7 @@ class DeformableDetrMultiheadAttention(nn.Module):
     ):
         super().__init__()
         self.embed_dim = embed_dim
+        self.config = config
         self.num_heads = num_heads
         self.dropout = dropout
         self.head_dim = embed_dim // num_heads
@@ -748,6 +756,18 @@ class DeformableDetrMultiheadAttention(nn.Module):
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
 
+        # --- CORRESPONDENCE EMBEDDING IMPLEMENTATION ---
+        # A flag to control using new learnable correspondence embeddings
+        self.use_correspondence_embedding = getattr(config, "use_correspondence_embedding", False)
+        # A separate flag to control using existing positional embeddings
+        self.use_positional_embedding_for_correspondence = getattr(config, "use_positional_embedding_for_correspondence", False)
+
+        if self.use_correspondence_embedding and self.use_positional_embedding_for_correspondence:
+            raise ValueError("Cannot use both correspondence_embedding and positional_embedding_for_correspondence at the same time.")
+
+        if self.use_correspondence_embedding:
+            self.correspondence_embedding = nn.Embedding(config.num_queries, embed_dim)
+
     def _shape(self, tensor: torch.Tensor, seq_len: int, batch_size: int):
         return tensor.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
 
@@ -761,26 +781,65 @@ class DeformableDetrMultiheadAttention(nn.Module):
         position_embeddings: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
         prompt_list=None,
+        prefix_tuning: bool = True,
+        proposal_masking=False,
+        prompt_as_input_bias: bool = False,
+        prompt_as_query_bias: bool = False,
+        prompt_as_addition_bias = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         """Input shape: Batch x Time x Channel"""
+
+        if prompt_as_query_bias and prompt_as_input_bias:
+            raise ValueError("Cannot use both query_bias and input_bias at once")
 
         batch_size, target_len, embed_dim = hidden_states.size()
         # add position embeddings to the hidden states before projecting to queries and keys
         if position_embeddings is not None:
+            # print("<Positional Embeeding> USed")
             hidden_states_original = hidden_states
             hidden_states = self.with_pos_embed(hidden_states, position_embeddings)
+
+        # Add learnable correspondence embeddings to queries ---
+        if self.use_correspondence_embedding:
+            # Create a tensor of indices [0, 1, 2, ..., N-1]
+            correspondence_indices = torch.arange(target_len, device=hidden_states.device)
+            # Get the embedding for each proposal slot and add it to the hidden_states
+            hidden_states = hidden_states + self.correspondence_embedding(correspondence_indices).unsqueeze(0)
+
+        if prompt_list is not None and prompt_as_input_bias:
+            pk, _ = prompt_list
+            # pk has shape (B, N, D) when T_p=1
+            hidden_states = hidden_states + pk
         
         # get queries, keys and values
         query_states = self.q_proj(hidden_states) * self.scaling
+
+        if prompt_list is not None and prompt_as_query_bias:
+            pk, _ = prompt_list
+            # pk has shape (B, N, D) when T_p=1
+            query_states = query_states + pk
 
         key_states = self.k_proj(hidden_states)
 
         value_states = self.v_proj(hidden_states_original)
 
-        if prompt_list is not None:
+        # prefix tuning
+        if prompt_list is not None and prefix_tuning:
             pk, pv = prompt_list
+            
+            # --- Correspondence ---
+            if self.use_correspondence_embedding:
+                # Add the same learned correspondence embedding to the memory keys
+                pk = pk + self.correspondence_embedding(correspondence_indices).unsqueeze(0)
+            elif self.use_positional_embedding_for_correspondence:
+                # Add the query's positional embedding to its corresponding memory key (pk).
+                if position_embeddings is not None:
+                    pk = pk + position_embeddings
+
             key_states = torch.cat((pk,key_states), dim=1)
             value_states = torch.cat((pv,value_states), dim=1)
+
+        # print(f"key_states: {key_states.size()}, value_states: {value_states.size()}")
 
         key_states = self._shape(key_states, -1, batch_size)
         value_states = self._shape(value_states, -1, batch_size)
@@ -814,6 +873,40 @@ class DeformableDetrMultiheadAttention(nn.Module):
             attn_weights = attn_weights.view(batch_size, self.num_heads, target_len, source_len) + attention_mask
             attn_weights = attn_weights.view(batch_size * self.num_heads, target_len, source_len)
 
+        if prompt_list is not None and proposal_masking:
+            # source_len = N + N *l [original object queries + l prompts per object query]
+            # target_len = N [original object queries]
+            # l_per_query = ((N + N *l) - N) / N
+            l_per_query = (source_len - target_len) // target_len
+
+            device = attn_weights.device
+            dtype  = attn_weights.dtype
+
+            # build a (target_len, source_len) boolean mask: True = keep, False = block
+            mask2d = torch.zeros((target_len, source_len), device=device, dtype=torch.bool)
+            mask2d[:, :target_len] = True   #  allow original object-query to object-query
+
+            #  for each query i, allow exactly its own l_per_query prompts
+            for i in range(target_len):
+                start = target_len + i * l_per_query
+                end   = start + l_per_query
+                mask2d[i, start:end] = True
+
+            # turn bool mask into a “-inf mask” of shape (1,1,tgt_len,src_len)
+            # neg_inf = torch.finfo(dtype).min
+            neg_inf = -1e9 if dtype == torch.float32 else -1e4
+            float_mask = torch.full((target_len, source_len), neg_inf, device=device, dtype=dtype)
+            float_mask[mask2d] = 0.0
+            mask4d = float_mask.unsqueeze(0).unsqueeze(0)   # (1,1,tgt_len,src_len)
+
+            # print(f"[Using prompt attention mask]: {mask4d}")
+
+
+            # add it onto raw attn_logits, broadcasting over batch & heads
+            attn_weights = attn_weights.view(batch_size, self.num_heads, target_len, source_len)
+            attn_weights = attn_weights + mask4d
+            attn_weights = attn_weights.view(batch_size * self.num_heads, target_len, source_len)
+
         attn_weights = nn.functional.softmax(attn_weights, dim=-1)
 
         if output_attentions:
@@ -841,6 +934,13 @@ class DeformableDetrMultiheadAttention(nn.Module):
         attn_output = attn_output.reshape(batch_size, target_len, embed_dim)
 
         attn_output = self.out_proj(attn_output)
+
+        # addition‐bias
+        if prompt_list is not None and prompt_as_addition_bias:
+            # TODO: currently ignore pk; just use pv as a learned bias
+            _, pv = prompt_list
+            # TODO: pv: (B, target_len, embed_dim) since assuming T_p=1
+            attn_output = attn_output + pv
 
         return attn_output, attn_weights_reshaped
 
@@ -937,6 +1037,7 @@ class DeformableDetrDecoderLayer(nn.Module):
 
         # self-attention
         self.self_attn = DeformableDetrMultiheadAttention(
+            config=config,
             embed_dim=self.embed_dim,
             num_heads=config.decoder_attention_heads,
             dropout=config.attention_dropout,
@@ -994,6 +1095,7 @@ class DeformableDetrDecoderLayer(nn.Module):
         residual = hidden_states
 
         # Self Attention
+        # print(f"DecoderLayer self attenttion:")
         hidden_states, self_attn_weights = self.self_attn(
             hidden_states=hidden_states,
             position_embeddings=position_embeddings,
@@ -1010,6 +1112,8 @@ class DeformableDetrDecoderLayer(nn.Module):
 
         # Cross-Attention
         cross_attn_weights = None
+        # print(f"DecoderLayer cross attenttion:")
+
         hidden_states, cross_attn_weights = self.encoder_attn(
             hidden_states=hidden_states,
             attention_mask=encoder_attention_mask,
@@ -1393,7 +1497,7 @@ class DeformableDetrDecoder(DeformableDetrPreTrainedModel):
                 if isinstance(prompts, ExperimentPrompt):
                     p_list, _, output = prompts.forward(query, idx, hidden_states, train=train, task_id=task_id, class_labels=class_labels)
                 else:
-                    p_list, _, output = prompts.forward(query, idx, hidden_states, train=train)
+                    p_list, _, output = prompts.forward(query, idx, hidden_states, train=train, task_id=task_id)
 
 
             if self.gradient_checkpointing and self.training:
@@ -1492,11 +1596,21 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         self.backbone = DeformableDetrConvModel(backbone, position_embeddings)
 
         if config.use_prompts:
-            self.prompts = ExperimentPrompt(emb_d=config.d_model, n_tasks=config.n_tasks, 
-                                    prompt_param=PromptParam(e_pool_size=config.num_prompts,
-                                                            e_p_length=config.prompt_len),
-                                    #  prompt_param=[config.num_prompts,config.prompt_len,0],
-                                     key_dim=config.d_model, args=config)
+            # self.prompts = ExperimentPrompt(emb_d=config.d_model, n_tasks=config.n_tasks, 
+            #                         prompt_param=PromptParam(e_pool_size=config.num_prompts,
+            #                                                 e_p_length=config.prompt_len),
+            #                         #  prompt_param=[config.num_prompts,config.prompt_len,0],
+            #                          key_dim=config.d_model, args=config)
+            # self.prompts = DynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
+            #                              e_p_length=config.prompt_len, local_query=config.local_query)
+            # self.prompts = ClassWiseDynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=5, 
+            #                                         e_p_length=config.prompt_len, local_query=config.local_query)
+            # self.prompts = TaskSpecificMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
+            #                              e_p_length=config.prompt_len, local_query=config.local_query)
+            # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
+            #                                 e_p_length=config.prompt_len, local_query=config.local_query)
+            self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=20, 
+                                            e_p_length=2, local_query=config.local_query)
 
         # Create input projection layers
         if config.num_feature_levels > 1:
@@ -1813,6 +1927,12 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         else:
             prompts = None
 
+        # print(f"encoder outputs: shape: {encoder_outputs.shape}, ")
+        # print(f"encoder outputs[0]: shape: {encoder_outputs[0].shape}, ")
+        # print(f"encoder outputs[0]: {encoder_outputs[0]}")
+
+        # pdb.set_trace()
+
         decoder_outputs = self.decoder(
             inputs_embeds=target,
             position_embeddings=query_embed,
@@ -1837,6 +1957,9 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             tuple_outputs = (init_reference_points,) + decoder_outputs + encoder_outputs + enc_outputs
 
             return tuple_outputs
+
+        # print(f"decoder last hidden layer: shape: {decoder_outputs.last_hidden_state.shape}, ")
+        # print(f"decoder last hidden layer: {decoder_outputs.last_hidden_state}")
 
         return DeformableDetrModelOutput(
             init_reference_points=init_reference_points,
@@ -1999,7 +2122,18 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
         Detected cat with confidence 0.789 at location [342.19, 24.3, 640.02, 372.25]
         Detected remote with confidence 0.633 at location [40.79, 72.78, 176.76, 117.25]
         ```"""
+
+        # print(f"lables[:2]: {labels[:2]}")
+        # """
+        # lables[:2]: [{'size': tensor([1204,  800], device='cuda:0'), 'image_id': tensor([132548], device='cuda:0'), 'class_labels': tensor([18], device='cuda:0'), 'boxes': tensor([[0.9329, 0.8040, 0.1342, 0.1399]], device='cuda:0'), 'area': tensor([11578.4707], device='cuda:0'), 'iscrowd': tensor([0], device='cuda:0'), 'orig_size': tensor([500, 332], device='cuda:0')}]
+        # """
+
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        if labels is not None:
+            self.model.prompts.set_image_ids([label["image_id"] for label in labels])
+        else:
+            self.model.prompts.set_image_ids(None)
 
         # First, sent images through DETR base model to obtain encoder + decoder outputs
         outputs = self.model(
@@ -2037,8 +2171,8 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
 
             outputs_class = self.class_embed[level](hidden_states[:, level])
 
-            if (torch.isnan(hidden_states[:, level]).any()):
-                pdb.set_trace()
+            # if (torch.isnan(hidden_states[:, level]).any()):
+            #     pdb.set_trace()
 
             delta_bbox = self.bbox_embed[level](hidden_states[:, level])
             if reference.shape[-1] == 4:

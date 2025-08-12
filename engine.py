@@ -1,8 +1,12 @@
+import logging
 import os
 import sys
 import pdb
 import tqdm
 import torch
+from models.memory.class_wise_dyn_memory import ClassWiseDynamicPrompt
+from models.memory.dyn_memory import DynamicPrompt
+from models.probes.memory_probe import DebugAttribute, MemoryProbe
 import utils
 import numpy as np
 import torch.nn as nn
@@ -13,10 +17,24 @@ from PIL import Image, ImageDraw
 from datasets.coco_eval import CocoEvaluator
 import torch.nn.functional as F
 from datasets.coco_hug import CocoDetection, task_info_coco, create_task_json
+
+from g_utils.common import stardardize_object_class_name
+
 from models.image_processing_deformable_detr import DeformableDetrImageProcessor 
 from models.configuration_deformable_detr import DeformableDetrConfig
 from models.md_detr.configuration_md_detr import MDDetrConfig
-from models.modeling_deformable_detr import DeformableDetrForObjectDetection
+
+# --- DUAL MEMORY: Conditional Import ---
+# We import the appropriate model class based on the config flag.
+def get_model_class(use_dual_memory_model: bool):
+    if use_dual_memory_model:
+        print("<<<<< Using Experimental Dual Memory Model >>>>>")
+        from models.modeling_dual_memory_detr import DualMemoryDetrForObjectDetection
+        return DualMemoryDetrForObjectDetection
+    else:
+        from models.modeling_deformable_detr import DeformableDetrForObjectDetection
+        return DeformableDetrForObjectDetection
+
 from models.md_detr.modeling_md_detr import MDDetrForObjectDetection
 
 def find_param_nans(model):
@@ -43,23 +61,72 @@ class local_trainer(pl.LightningModule):
 		detr_config.prompt_len = args.prompt_len
 		detr_config.local_query = args.local_query
 
+		# --- Propagate correspondence embedding flags to the model config ---
+		detr_config.use_correspondence_embedding = args.use_correspondence_embedding
+		detr_config.use_positional_embedding_for_correspondence = args.use_positional_embedding_for_correspondence
+		# --- End of change ---
+
 		self.invalid_cls_logits = list(range(seen_classes, args.n_classes-1)) #unknown class indx will not be included in the invalid class range
 
+		ModelClass = get_model_class(args.use_dual_memory_model)
+
 		if args.repo_name:
-			self.model =  DeformableDetrForObjectDetection.from_pretrained(args.repo_name,config=detr_config,
+			self.model =  ModelClass.from_pretrained(args.repo_name,config=detr_config,
 																	ignore_mismatched_sizes=True,
 																	default=not(args.mask_gradients), log_file=args.log_file)
 			self.processor = DeformableDetrImageProcessor.from_pretrained(args.repo_name)
 		else:
-			self.model = DeformableDetrForObjectDetection(detr_config, default=not(args.mask_gradients),
+			self.model = ModelClass(detr_config, default=not(args.mask_gradients),
 												 log_file=args.log_file)
-			
 			self.processor = DeformableDetrImageProcessor()
 
-		if self.model.model.prompts:
-			self.model.model.prompts.reset_parameters()
+		# --- DUAL MEMORY / SINGLE MEMORY INITIALIZATION ---
+		if args.use_dual_memory_model:
+			# Handle dual memory initialization
+			prompts_all = self.model.model.prompts_all
+			prompts_q_to_ek = self.model.model.prompts_q_to_ek
+			for tid in range(1, task_id + 1):
+				prompts_all.initialize_for_task(tid)
+				prompts_q_to_ek.initialize_for_task(tid)
+			prompts_all.set_task_id(task_id - 1)
+			prompts_q_to_ek.set_task_id(task_id - 1)
+			prompts_all.reset_parameters()
+			prompts_q_to_ek.reset_parameters()
+			self.prompts = None # Ensure single prompt logic is not triggered
+		elif getattr(self.model.model, 'prompts', None):
+			# Handle single memory initialization (backward compatibility)
+			prompts = self.model.model.prompts
+			if isinstance(prompts, ClassWiseDynamicPrompt):
+				# get all classes present in current task
+				object_class_names = []
+				for tid in range(1, task_id+1):
+					class_names, start_idx, num_classes = args.task_map[tid]
+					object_class_names.extend(class_names)
+
+				# standardize class names
+				stadardized_object_class_names = [stardardize_object_class_name(name) for name in object_class_names]
+				
+				print(f"object classes for task {task_id}: {stadardized_object_class_names}")
+
+				prompts.initialize_for_task(task_id, object_classes=stadardized_object_class_names)
+
+			else:
+				for tid in range(1, task_id+1):
+						prompts.initialize_for_task(tid)
+
+			prompts.set_task_id(task_id - 1)
+			prompts.reset_parameters()
+			self.prompts = prompts # Set for use in other parts of the trainer
 
 		find_param_nans(self.model)
+
+		self.prompts = getattr(self.model.model, "prompts", None)
+
+		# set debug
+		self.mem_probe = MemoryProbe(
+            out_dir=f"{args.output_dir}/mem_trace/mem_traces_task{task_id}")
+		
+
 		
 		self.task_id = task_id
 		self.lr = args.lr
@@ -77,7 +144,31 @@ class local_trainer(pl.LightningModule):
 		self.PREV_INTRODUCED_CLS = args.task_map[task_id][1]
 
 		#self.automatic_optimization = False
+		debug_dir = os.path.join(args.output_dir, "debug_logs")
+		os.makedirs(debug_dir, exist_ok=True)
+		# make a logger
+		self._mem_logger = logging.getLogger(f"mem_debug_task{task_id}")
+		self._mem_logger.setLevel(logging.INFO)
+		# file handler writes to memory_debug_task{task_id}.log
+		fh = logging.FileHandler(os.path.join(debug_dir, f"memory_debug_task{task_id}.log"))
+		fh.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+		self._mem_logger.addHandler(fh)
+
+	def get_probe_status(self):
+		if self.prompts is None:
+			return False
+		return self.prompts.debug
 	
+	def set_probe_active(self, active: bool, debug_attribute: DebugAttribute = None):
+		if self.prompts is None:
+			return
+		
+		self.prompts.debug = active
+		
+		self.prompts.debug_probe = self.mem_probe if active else None
+		self.prompts.debug_attribute = debug_attribute if active else None
+		self.mem_probe.tag = debug_attribute.true_task_id if active else None
+
 	def forward(self, pixel_values, pixel_mask):
 		outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask)
 		return outputs
@@ -100,10 +191,12 @@ class local_trainer(pl.LightningModule):
 
 		return labels
 	
-	def common_step(self, batch, batch_idx, return_outputs=None):
+	def common_step(self, batch, batch_idx, return_outputs=None, train=False, class_wise=True):
 		pixel_values = batch["pixel_values"].to(self.device)
 		pixel_mask = batch["pixel_mask"].to(self.device)
 		labels = [{k: v.to(self.device) for k, v in t.items()} for t in batch["labels"]]
+
+		# print(labels)
 
 		# print(f"Labels: {labels}")
 		orig_target_sizes = torch.stack([target["orig_size"] for target in labels], dim=0)
@@ -137,10 +230,31 @@ class local_trainer(pl.LightningModule):
 		
 		# BG thresholding on previously seen classes
 		if self.args.bg_thres and not return_outputs and self.args.use_prompts:
-		# if self.args.bg_thres and not return_outputs:
 			labels = self.BG_thresholding(results=results, labels=labels)
 
-		outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels, query=query, train=True, task_id=self.task_id)
+		# if class_wise and train:
+		if True:
+			raw_class_labels_batches = [label['class_labels'] for label in labels]
+			# print(f"Class labels: {class_labels}")
+			class_names_batches = []
+
+			for batch_labels in raw_class_labels_batches:
+				list_labels = batch_labels.tolist()
+				class_names_batches.append([ stardardize_object_class_name(self.args.task_label2name[i]) for i in list_labels ])
+
+			
+			prompts = self.model.model.prompts
+			# Pass batch metadata to the prompt module so it can be used for recording
+			if hasattr(prompts, 'set_batch_metadata'):
+				img_ids = [l['image_id'].item() for l in labels]
+				prompts.set_batch_metadata(img_ids=img_ids, class_labels=class_names_batches)
+
+			prompts.set_activate_classes(class_names_batches)
+
+			outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels, query=query, train=True, task_id=self.task_id)
+		else:
+			outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels, query=query, train=True, task_id=self.task_id)
+
 
 		loss = outputs.loss
 		loss_dict = outputs.loss_dict
@@ -167,7 +281,7 @@ class local_trainer(pl.LightningModule):
 		return loss, loss_dict
 	
 	def training_step(self, batch, batch_idx): # automatic training schedule
-		loss, loss_dict = self.common_step(batch, batch_idx)
+		loss, loss_dict = self.common_step(batch, batch_idx, train=True)
 		# logs metrics for each training_step
 		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL'}
 		self.log("tr", loss, prog_bar=True)
@@ -181,6 +295,13 @@ class local_trainer(pl.LightningModule):
 		for i in range(len(self.model.class_embed)):
 			self.model.class_embed[i].weight.grad[:self.PREV_INTRODUCED_CLS,:] = 0
 			self.model.class_embed[i].bias.grad[:self.PREV_INTRODUCED_CLS] = 0
+
+		# unused = [name for name, p in self.named_parameters() if p.grad is None]
+		# if unused:
+		# 	self._mem_logger.info(f"⚠️  Unused parameters ({len(unused)}):")
+		# 	for n in unused:
+		# 		self._mem_logger.info(f"    {n}")
+
 		return
 
 	def on_train_epoch_end(self):
@@ -207,7 +328,7 @@ class local_trainer(pl.LightningModule):
 			if self.trainer.global_rank == 0:
 				self.evaluator.print_coco_stats(self.current_epoch, stats, self.print_count)
 				self.print_count = 1
-				if self.args.viz:
+				if self.args.viz and not self.evaluator.record_probes:
 					image_ids = self.evaluator.test_dataset.coco.getImgIds()
 					for id in image_ids[0:self.args.num_imgs_viz]:
 						self.evaluator.vizualize(id=id)
@@ -295,6 +416,22 @@ class local_trainer(pl.LightningModule):
 
 	def val_dataloader(self):
 		return self.val_dataloader
+	
+	def on_train_start(self):
+		prompts = getattr(self.model.model, "prompts", None)
+		if prompts is not None:
+			for layer, task_dict in prompts.layer_memories.items():
+				for tid, mem in task_dict.items():
+					self._mem_logger.info(
+						f"Layer {layer} | Task {tid} | #p={len(mem.p_list)} #k={len(mem.k_list)} #a={len(mem.a_list)}"
+					)
+		# every parameter’s device
+		# self._mem_logger.info("=== Parameter device map ===")
+		# for name, p in self.model.named_parameters():
+		# 	# if name.startswith("model.prompts."):
+		# 	self._mem_logger.info(f"{name:<60} → {p.device}")
+		# self._mem_logger.info("============================")
+
 
 class Evaluator():
 	def __init__(self, processor, test_dataset, test_dataloader, coco_evaluator, 
@@ -313,6 +450,7 @@ class Evaluator():
 		self.coco_evaluator = coco_evaluator
 		self.task_label2name = task_label2name
 		self.args = args
+		self.record_probes = args.record_probes
 		self.local_eval = local_eval
 		self.task_id = task_id
 		self.task_name = task_name
@@ -427,7 +565,7 @@ class Evaluator():
 			else:
 				query = None
 
-			outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, query=query, train=False)
+			outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, query=query, train=False, task_id=self.task_id)
 
 			if self.args.mask_gradients:
 				outputs.logits[:,:, self.invalid_cls_logits] = -10e10
@@ -450,16 +588,20 @@ class Evaluator():
 		elif self.local_trainer.trainer.global_rank == 0:
 			self.print_coco_stats(epoch=args.epochs+1, stats=coco_evaluator.coco_eval[args.iou_types[0]].stats, print_count=1)
 
-		if args.viz:
+		if args.viz and not self.record_probes:
 			image_ids = self.test_dataset.coco.getImgIds()
 			#print(image_ids[0:4])
 			for id in image_ids[0:self.args.num_imgs_viz]:
 				try:
-					self.vizualize()
+					self.vizualize(id=id)
 				except:
 					continue
 
 	def vizualize(self, id=None, score_threshold=0.18, device='cuda'):
+		pre_prob_status = self.local_trainer.get_probe_status() if self.local_trainer else False
+		self.local_trainer.set_probe_active(False)
+
+
 		test_dataset = self.test_dataset
 		image_ids = test_dataset.coco.getImgIds()
 		
@@ -528,3 +670,5 @@ class Evaluator():
 				ax[i].set_axis_off()
 
 		plt.savefig(os.path.join(self.args.output_dir, f'{task}_img_{image_id}.jpg'), bbox_inches = 'tight',pad_inches = 0.1)
+
+		self.local_trainer.set_probe_active(pre_prob_status)
