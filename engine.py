@@ -23,7 +23,18 @@ from g_utils.common import stardardize_object_class_name
 from models.image_processing_deformable_detr import DeformableDetrImageProcessor 
 from models.configuration_deformable_detr import DeformableDetrConfig
 from models.md_detr.configuration_md_detr import MDDetrConfig
-from models.modeling_deformable_detr import DeformableDetrForObjectDetection
+
+# --- DUAL MEMORY: Conditional Import ---
+# We import the appropriate model class based on the config flag.
+def get_model_class(use_dual_memory_model: bool):
+    if use_dual_memory_model:
+        print("<<<<< Using Experimental Dual Memory Model >>>>>")
+        from models.modeling_dual_memory_detr import DualMemoryDetrForObjectDetection
+        return DualMemoryDetrForObjectDetection
+    else:
+        from models.modeling_deformable_detr import DeformableDetrForObjectDetection
+        return DeformableDetrForObjectDetection
+
 from models.md_detr.modeling_md_detr import MDDetrForObjectDetection
 
 def find_param_nans(model):
@@ -50,19 +61,40 @@ class local_trainer(pl.LightningModule):
 		detr_config.prompt_len = args.prompt_len
 		detr_config.local_query = args.local_query
 
+		# --- Propagate correspondence embedding flags to the model config ---
+		detr_config.use_correspondence_embedding = args.use_correspondence_embedding
+		detr_config.use_positional_embedding_for_correspondence = args.use_positional_embedding_for_correspondence
+		# --- End of change ---
+
 		self.invalid_cls_logits = list(range(seen_classes, args.n_classes-1)) #unknown class indx will not be included in the invalid class range
 
+		ModelClass = get_model_class(args.use_dual_memory_model)
+
 		if args.repo_name:
-			self.model =  DeformableDetrForObjectDetection.from_pretrained(args.repo_name,config=detr_config,
+			self.model =  ModelClass.from_pretrained(args.repo_name,config=detr_config,
 																	ignore_mismatched_sizes=True,
 																	default=not(args.mask_gradients), log_file=args.log_file)
 			self.processor = DeformableDetrImageProcessor.from_pretrained(args.repo_name)
 		else:
-			self.model = DeformableDetrForObjectDetection(detr_config, default=not(args.mask_gradients),
+			self.model = ModelClass(detr_config, default=not(args.mask_gradients),
 												 log_file=args.log_file)
 			self.processor = DeformableDetrImageProcessor()
 
-		if getattr(self.model.model, 'prompts', None):
+		# --- DUAL MEMORY / SINGLE MEMORY INITIALIZATION ---
+		if args.use_dual_memory_model:
+			# Handle dual memory initialization
+			prompts_all = self.model.model.prompts_all
+			prompts_q_to_ek = self.model.model.prompts_q_to_ek
+			for tid in range(1, task_id + 1):
+				prompts_all.initialize_for_task(tid)
+				prompts_q_to_ek.initialize_for_task(tid)
+			prompts_all.set_task_id(task_id - 1)
+			prompts_q_to_ek.set_task_id(task_id - 1)
+			prompts_all.reset_parameters()
+			prompts_q_to_ek.reset_parameters()
+			self.prompts = None # Ensure single prompt logic is not triggered
+		elif getattr(self.model.model, 'prompts', None):
+			# Handle single memory initialization (backward compatibility)
 			prompts = self.model.model.prompts
 			if isinstance(prompts, ClassWiseDynamicPrompt):
 				# get all classes present in current task
@@ -84,6 +116,7 @@ class local_trainer(pl.LightningModule):
 
 			prompts.set_task_id(task_id - 1)
 			prompts.reset_parameters()
+			self.prompts = prompts # Set for use in other parts of the trainer
 
 		find_param_nans(self.model)
 

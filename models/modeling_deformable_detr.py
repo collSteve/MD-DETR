@@ -732,6 +732,7 @@ class DeformableDetrMultiheadAttention(nn.Module):
 
     def __init__(
         self,
+        config: DeformableDetrConfig,
         embed_dim: int,
         num_heads: int,
         dropout: float = 0.0,
@@ -739,6 +740,7 @@ class DeformableDetrMultiheadAttention(nn.Module):
     ):
         super().__init__()
         self.embed_dim = embed_dim
+        self.config = config
         self.num_heads = num_heads
         self.dropout = dropout
         self.head_dim = embed_dim // num_heads
@@ -753,6 +755,18 @@ class DeformableDetrMultiheadAttention(nn.Module):
         self.v_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+
+        # --- CORRESPONDENCE EMBEDDING IMPLEMENTATION ---
+        # A flag to control using new learnable correspondence embeddings
+        self.use_correspondence_embedding = getattr(config, "use_correspondence_embedding", False)
+        # A separate flag to control using existing positional embeddings
+        self.use_positional_embedding_for_correspondence = getattr(config, "use_positional_embedding_for_correspondence", False)
+
+        if self.use_correspondence_embedding and self.use_positional_embedding_for_correspondence:
+            raise ValueError("Cannot use both correspondence_embedding and positional_embedding_for_correspondence at the same time.")
+
+        if self.use_correspondence_embedding:
+            self.correspondence_embedding = nn.Embedding(config.num_queries, embed_dim)
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, batch_size: int):
         return tensor.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
@@ -781,8 +795,16 @@ class DeformableDetrMultiheadAttention(nn.Module):
         batch_size, target_len, embed_dim = hidden_states.size()
         # add position embeddings to the hidden states before projecting to queries and keys
         if position_embeddings is not None:
+            # print("<Positional Embeeding> USed")
             hidden_states_original = hidden_states
             hidden_states = self.with_pos_embed(hidden_states, position_embeddings)
+
+        # Add learnable correspondence embeddings to queries ---
+        if self.use_correspondence_embedding:
+            # Create a tensor of indices [0, 1, 2, ..., N-1]
+            correspondence_indices = torch.arange(target_len, device=hidden_states.device)
+            # Get the embedding for each proposal slot and add it to the hidden_states
+            hidden_states = hidden_states + self.correspondence_embedding(correspondence_indices).unsqueeze(0)
 
         if prompt_list is not None and prompt_as_input_bias:
             pk, _ = prompt_list
@@ -804,6 +826,16 @@ class DeformableDetrMultiheadAttention(nn.Module):
         # prefix tuning
         if prompt_list is not None and prefix_tuning:
             pk, pv = prompt_list
+            
+            # --- Correspondence ---
+            if self.use_correspondence_embedding:
+                # Add the same learned correspondence embedding to the memory keys
+                pk = pk + self.correspondence_embedding(correspondence_indices).unsqueeze(0)
+            elif self.use_positional_embedding_for_correspondence:
+                # Add the query's positional embedding to its corresponding memory key (pk).
+                if position_embeddings is not None:
+                    pk = pk + position_embeddings
+
             key_states = torch.cat((pk,key_states), dim=1)
             value_states = torch.cat((pv,value_states), dim=1)
 
@@ -1005,6 +1037,7 @@ class DeformableDetrDecoderLayer(nn.Module):
 
         # self-attention
         self.self_attn = DeformableDetrMultiheadAttention(
+            config=config,
             embed_dim=self.embed_dim,
             num_heads=config.decoder_attention_heads,
             dropout=config.attention_dropout,
@@ -1568,16 +1601,16 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             #                                                 e_p_length=config.prompt_len),
             #                         #  prompt_param=[config.num_prompts,config.prompt_len,0],
             #                          key_dim=config.d_model, args=config)
-            self.prompts = DynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
-                                         e_p_length=config.prompt_len, local_query=config.local_query)
+            # self.prompts = DynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
+            #                              e_p_length=config.prompt_len, local_query=config.local_query)
             # self.prompts = ClassWiseDynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=5, 
             #                                         e_p_length=config.prompt_len, local_query=config.local_query)
             # self.prompts = TaskSpecificMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
             #                              e_p_length=config.prompt_len, local_query=config.local_query)
             # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
             #                                 e_p_length=config.prompt_len, local_query=config.local_query)
-            # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=20, 
-            #                                 e_p_length=2, local_query=config.local_query)
+            self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=20, 
+                                            e_p_length=2, local_query=config.local_query)
 
         # Create input projection layers
         if config.num_feature_levels > 1:

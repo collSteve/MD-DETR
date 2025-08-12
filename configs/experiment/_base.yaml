@@ -29,3 +29,12 @@ resume: 0
 
 local_query: 1
 record_probes: false
+
+# --- CORRESPONDENCE EMBEDDING FLAGS ---
+# Use new learnable correspondence embeddings
+use_correspondence_embedding: false
+# Use existing positional embeddings for correspondence
+use_positional_embedding_for_correspondence: false
+
+# --- DUAL MEMORY MODEL FLAG ---
+use_dual_memory_model: false

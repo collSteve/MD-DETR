@@ -212,7 +212,17 @@ def get_args_parser():
                         help='Path to a larger pretrained model for initialization')
     
     parser.add_argument('--record_probes', action='store_true', help="Enable probe recording during evaluation")
+
+    # Correspondence embedding flags
+    parser.add_argument('--use_correspondence_embedding', action='store_true',
+                        help="Use new learnable correspondence embeddings (Approach A)")
+    parser.add_argument('--use_positional_embedding_for_correspondence', action='store_true',
+                        help="Use existing positional embeddings for correspondence (Approach B)")
     
+    # Dual memory model flag
+    parser.add_argument('--use_dual_memory_model', action='store_true',
+                        help="Use the experimental dual memory model.")
+
     return parser
 
 def main(args):
@@ -229,25 +239,40 @@ def main(args):
     out_dir_root = args.output_dir
     
     # Get the canonical task map
-    canonical_task_map, args.task_label2name =  task_info_coco(split_point=args.split_point)
+    canonical_task_map, canonical_label2name =  task_info_coco(split_point=args.split_point)
     
-    # If a custom task order is provided, remap the canonical task map
+    # If a custom task order is provided, reconstruct the task_map and task_label2name
+    # to ensure class IDs are contiguous according to the new order.
     if args.task_order:
         print(f"Received custom task order: {args.task_order}")
         if sorted(args.task_order) != list(range(1, len(canonical_task_map) + 1)):
             raise ValueError(f"Task order must be a permutation of {list(range(1, len(canonical_task_map) + 1))}")
         
-        reordered_task_map = {new_task_id: canonical_task_map[original_task_id] 
-                              for new_task_id, original_task_id in enumerate(args.task_order, 1)}
+        reordered_task_map = {}
+        reordered_label2name = {}
+        all_reordered_classes = []
+        current_offset = 0
+
+        for new_task_id, original_task_id in enumerate(args.task_order, 1):
+            class_names, _, class_count = canonical_task_map[original_task_id]
+            reordered_task_map[new_task_id] = (class_names, current_offset, class_count)
+            all_reordered_classes.extend(class_names)
+            current_offset += class_count
+        
+        for i, class_name in enumerate(all_reordered_classes):
+            reordered_label2name[i] = class_name
+
         args.task_map = reordered_task_map
-        print("Using reordered task map:")
+        args.task_label2name = reordered_label2name
+        
+        print("Using reordered task map and labels:")
         for k, v in args.task_map.items():
-            # Printing only the class count for brevity
             print(f"  Task {k}: {len(v[0])} classes, starting at offset {v[1]}")
     else:
+        # Default behavior
         args.task_map = canonical_task_map
-    # print(args.task_map)
-    # print(args.task_label2name)
+        args.task_label2name = canonical_label2name
+
     args.task_label2name[args.n_classes-1] = "BG"
 
     if args.repo_name:
@@ -266,7 +291,7 @@ def main(args):
         print('Logging: args ', args, file=args.log_file)
 
         if task_id == 1:
-            args.epochs = 10
+            args.epochs = 6
         else:
             args.epochs = 6
 

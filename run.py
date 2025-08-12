@@ -60,6 +60,14 @@ def main(cfg: DictConfig):
     if cfg.experiment.record_probes:
         common.append("--record_probes")
 
+    # --- Correspondence embedding flags to the CLI call if they are true ---
+    if cfg.experiment.get("use_correspondence_embedding", False):
+        common.append("--use_correspondence_embedding")
+    if cfg.experiment.get("use_positional_embedding_for_correspondence", False):
+        common.append("--use_positional_embedding_for_correspondence")
+    if cfg.experiment.get("use_dual_memory_model", False):
+        common.append("--use_dual_memory_model")
+
     if cfg.experiment.train:
         mode = [
             "--epochs",         str(cfg.experiment.epochs),
