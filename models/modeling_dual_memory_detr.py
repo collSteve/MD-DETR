@@ -30,8 +30,7 @@ from .memory.proposal_query_memory import ProposalQueryMemory
 class DualMemoryMultiheadAttention(DeformableDetrMultiheadAttention):
     """
     An extension of the Deformable DETR Multihead Attention that handles two
-    separate prompt streams: one for global context (<All>) and one for
-    specific correspondence (<Q-to-Ek>).
+    separate prompt streams and multiple integration strategies.
     """
     def forward(
         self,
@@ -53,27 +52,32 @@ class DualMemoryMultiheadAttention(DeformableDetrMultiheadAttention):
             hidden_states_original = hidden_states
             qkv_base = hidden_states
 
-        # Strategy: Query Bias from <Q-to-Ek> prompts, Prefix Tuning from <All> prompts.
+        q_to_ek_strategy = self.config.q_to_ek_strategy
 
-        # 1. Project Q, K, V from the clean base tensor
         query_states = self.q_proj(qkv_base) * self.scaling
         key_states = self.k_proj(qkv_base)
         value_states = self.v_proj(hidden_states_original)
 
-        # 2. Apply <Q-to-Ek> prompt as a Query Bias
         if prompts_specific is not None:
-            _, pv_specific = prompts_specific
-            if pv_specific.shape[1] == target_len:
-                # print("Using specific prompts for query bias")
-                query_states = query_states + pv_specific
+            pk_specific, pv_specific = prompts_specific
+            
+            if q_to_ek_strategy == "query_bias":
+                if pv_specific.shape[1] == target_len:
+                    query_states = query_states + pv_specific
+            elif q_to_ek_strategy == "pos_embed_prefix":
+                if position_embeddings is not None:
+                    pk_specific = pk_specific + position_embeddings
+                key_states = torch.cat((pk_specific, key_states), dim=1)
+                value_states = torch.cat((pv_specific, value_states), dim=1)
+            elif q_to_ek_strategy == "masked_prefix":
+                key_states = torch.cat((pk_specific, key_states), dim=1)
+                value_states = torch.cat((pv_specific, value_states), dim=1)
 
-        # 3. Apply <All> prompt using Prefix Tuning to Keys and Values
         if prompts_all is not None and prefix_tuning:
-            # print("Using all prompts for prefix tuning")
             pk_global, pv_global = prompts_all
             key_states = torch.cat((pk_global, key_states), dim=1)
             value_states = torch.cat((pv_global, value_states), dim=1)
-
+        
         key_states = self._shape(key_states, -1, batch_size)
         value_states = self._shape(value_states, -1, batch_size)
 
@@ -85,20 +89,27 @@ class DualMemoryMultiheadAttention(DeformableDetrMultiheadAttention):
         source_len = key_states.size(1)
         attn_weights = torch.bmm(query_states, key_states.transpose(1, 2))
         
-        if attn_weights.size() != (batch_size * self.num_heads, target_len, source_len):
-            raise ValueError(
-                f"Attention weights should be of size {(batch_size * self.num_heads, target_len, source_len)}, but is"
-                f" {attn_weights.size()}"
-            )
+        if q_to_ek_strategy == "masked_prefix" and prompts_specific is not None:
+            num_specific_prompts = prompts_specific[0].shape[1]
+            l_per_query = num_specific_prompts // target_len
+            num_all_prompts = prompts_all[0].shape[1] if prompts_all is not None else 0
+            
+            mask2d = torch.zeros((target_len, source_len), device=attn_weights.device, dtype=torch.bool)
+            mask2d[:, :num_all_prompts] = True
+            mask2d[:, -target_len:] = True
 
-        if attention_mask is not None:
-            attention_mask = _prepare_4d_attention_mask(attention_mask, hidden_states.dtype)
-            if attention_mask.size() != (batch_size, 1, target_len, source_len):
-                 raise ValueError(
-                    f"Attention mask should be of size {(batch_size, 1, target_len, source_len)}, but is"
-                    f" {attention_mask.size()}"
-                )
-            attn_weights = attn_weights.view(batch_size, self.num_heads, target_len, source_len) + attention_mask
+            for i in range(target_len):
+                start = num_all_prompts + i * l_per_query
+                end = start + l_per_query
+                mask2d[i, start:end] = True
+
+            neg_inf = -1e9
+            float_mask = torch.full((target_len, source_len), neg_inf, device=attn_weights.device, dtype=attn_weights.dtype)
+            float_mask[mask2d] = 0.0
+            mask4d = float_mask.unsqueeze(0).unsqueeze(0)
+            
+            attn_weights = attn_weights.view(batch_size, self.num_heads, target_len, source_len)
+            attn_weights = attn_weights + mask4d
             attn_weights = attn_weights.view(batch_size * self.num_heads, target_len, source_len)
 
         attn_weights = nn.functional.softmax(attn_weights, dim=-1)
@@ -113,24 +124,24 @@ class DualMemoryMultiheadAttention(DeformableDetrMultiheadAttention):
 
         if attn_output.size() != (batch_size * self.num_heads, target_len, self.head_dim):
             raise ValueError(
-                f"`attn_output` should be of size {(batch_size, self.num_heads, target_len, self.head_dim)}, but is"
+                f"`attn_output` should be of size {(batch_size * self.num_heads, target_len, self.head_dim)}, but is"
                 f" {attn_output.size()}"
             )
 
         attn_output = attn_output.view(batch_size, self.num_heads, target_len, self.head_dim)
         attn_output = attn_output.transpose(1, 2)
         attn_output = attn_output.reshape(batch_size, target_len, embed_dim)
-
         attn_output = self.out_proj(attn_output)
+
+        if q_to_ek_strategy == "output_bias" and prompts_specific is not None:
+            _, pv_specific = prompts_specific
+            if pv_specific.shape[1] == target_len:
+                attn_output = attn_output + pv_specific
 
         return attn_output, attn_weights_reshaped
 
 
 class DualMemoryDecoderLayer(DeformableDetrDecoderLayer):
-    """
-    An extension of the Deformable DETR Decoder Layer that uses the
-    DualMemoryMultiheadAttention module.
-    """
     def __init__(self, config: DeformableDetrConfig):
         super().__init__(config)
         self.self_attn = DualMemoryMultiheadAttention(
@@ -198,10 +209,6 @@ class DualMemoryDecoderLayer(DeformableDetrDecoderLayer):
 
 
 class DualMemoryDecoder(DeformableDetrDecoder):
-    """
-    An extension of the Deformable DETR Decoder that uses DualMemoryDecoderLayers
-    and calls the dual memory modules.
-    """
     def __init__(self, config: DeformableDetrConfig):
         super().__init__(config)
         self.layers = nn.ModuleList([DualMemoryDecoderLayer(config) for _ in range(config.decoder_layers)])
@@ -254,14 +261,28 @@ class DualMemoryDecoder(DeformableDetrDecoder):
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
-            p_all, p_specific = None, None
-            if query is not None and prompts_all is not None and prompts_specific is not None:
-                p_all, _, _ = prompts_all.forward(
-                    query, idx, hidden_states, train=train, task_id=task_id
-                )
-                p_specific, _, _ = prompts_specific.forward(
-                    query, idx, hidden_states, train=train, task_id=task_id
-                )
+            prompts_all_to_pass, prompts_specific_to_pass = None, None
+            strategy = self.config.dual_memory_strategy
+            switch_layer = self.config.dual_memory_switch_layer
+
+            should_generate_all = (strategy == "hybrid_everywhere") or \
+                                  (strategy == "phased_global_specific" and idx < switch_layer) or \
+                                  (strategy == "phased_hybrid_specific" and idx < switch_layer)
+
+            should_generate_specific = (strategy == "hybrid_everywhere") or \
+                                       (strategy == "phased_hybrid_specific" and idx < switch_layer) or \
+                                       (strategy == "phased_global_specific" and idx >= switch_layer) or \
+                                       (strategy == "phased_hybrid_specific" and idx >= switch_layer)
+
+            if query is not None:
+                if should_generate_all and prompts_all is not None:
+                    prompts_all_to_pass, _, _ = prompts_all.forward(
+                        query, idx, hidden_states, train=train, task_id=task_id
+                    )
+                if should_generate_specific and prompts_specific is not None:
+                    prompts_specific_to_pass, _, _ = prompts_specific.forward(
+                        query, idx, hidden_states, train=train, task_id=task_id
+                    )
 
             layer_outputs = decoder_layer(
                 hidden_states,
@@ -272,8 +293,8 @@ class DualMemoryDecoder(DeformableDetrDecoder):
                 level_start_index=level_start_index,
                 encoder_attention_mask=encoder_attention_mask,
                 output_attentions=output_attentions,
-                prompts_all=p_all,
-                prompts_specific=p_specific,
+                prompts_all=prompts_all_to_pass,
+                prompts_specific=prompts_specific_to_pass,
             )
 
             hidden_states = layer_outputs[0]
@@ -314,9 +335,6 @@ class DualMemoryDecoder(DeformableDetrDecoder):
 
 
 class DualMemoryDetrModel(DeformableDetrModel):
-    """
-    The top-level Deformable DETR model that uses the dual-memory system.
-    """
     def __init__(self, config: DeformableDetrConfig):
         super().__init__(config)
         self.decoder = DualMemoryDecoder(config)
@@ -330,7 +348,7 @@ class DualMemoryDetrModel(DeformableDetrModel):
                 emb_d=config.d_model, key_d=config.d_model, default_units=10, 
                 e_p_length=2, local_query=config.local_query
             )
-            self.prompts = self.prompts_all # for compatibility
+            self.prompts = self.prompts_all
         else:
             self.prompts = None
             self.prompts_all = None
@@ -353,8 +371,8 @@ class DualMemoryDetrModel(DeformableDetrModel):
         class_labels=None,
     ) -> Union[Tuple[torch.FloatTensor], DeformableDetrModelOutput]:
         
-        # This forward pass is a full copy of the base class's forward method,
-        # with one critical change: passing the dual memory modules to the decoder.
+        # This is a full copy of the original DeformableDetrModel.forward, with one change:
+        # It passes prompts_all and prompts_q_to_ek to the decoder.
         
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -428,7 +446,6 @@ class DualMemoryDetrModel(DeformableDetrModel):
 
         batch_size, _, num_channels = encoder_outputs[0].shape
         
-        # ... (logic for two_stage proposals is complex and unchanged, omitting for clarity) ...
         query_embed, target = torch.split(query_embeds, num_channels, dim=1)
         query_embed = query_embed.unsqueeze(0).expand(batch_size, -1, -1)
         target = target.unsqueeze(0).expand(batch_size, -1, -1)
@@ -470,10 +487,6 @@ class DualMemoryDetrModel(DeformableDetrModel):
 
 
 class DualMemoryDetrForObjectDetection(DeformableDetrForObjectDetection):
-    """
-    The final object detection model for the training engine. It uses the
-    DualMemoryDetrModel as its core.
-    """
     def __init__(self, config: DeformableDetrConfig, default=True, log_file=None):
         super().__init__(config, default=default, log_file=log_file)
         self.model = DualMemoryDetrModel(config)

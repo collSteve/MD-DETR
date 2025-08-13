@@ -64,6 +64,11 @@ class local_trainer(pl.LightningModule):
 		# --- Propagate correspondence embedding flags to the model config ---
 		detr_config.use_correspondence_embedding = args.use_correspondence_embedding
 		detr_config.use_positional_embedding_for_correspondence = args.use_positional_embedding_for_correspondence
+		
+		# --- Propagate dual memory strategy flags to the model config ---
+		detr_config.dual_memory_strategy = args.dual_memory_strategy
+		detr_config.dual_memory_switch_layer = args.dual_memory_switch_layer
+		detr_config.q_to_ek_strategy = args.q_to_ek_strategy
 		# --- End of change ---
 
 		self.invalid_cls_logits = list(range(seen_classes, args.n_classes-1)) #unknown class indx will not be included in the invalid class range

@@ -67,6 +67,12 @@ def main(cfg: DictConfig):
         common.append("--use_positional_embedding_for_correspondence")
     if cfg.experiment.get("use_dual_memory_model", False):
         common.append("--use_dual_memory_model")
+        # Also add the strategy flags if the dual model is being used
+        common.extend([
+            "--dual_memory_strategy", cfg.experiment.get("dual_memory_strategy", "hybrid_everywhere"),
+            "--dual_memory_switch_layer", str(cfg.experiment.get("dual_memory_switch_layer", 3)),
+            "--q_to_ek_strategy", cfg.experiment.get("q_to_ek_strategy", "query_bias")
+        ])
 
     if cfg.experiment.train:
         mode = [

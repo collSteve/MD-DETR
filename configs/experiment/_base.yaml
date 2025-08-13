@@ -38,3 +38,13 @@ use_positional_embedding_for_correspondence: false
 
 # --- DUAL MEMORY MODEL FLAG ---
 use_dual_memory_model: false
+
+# --- DUAL MEMORY STRATEGY FLAGS ---
+# "hybrid_everywhere", "phased_global_specific", "phased_hybrid_specific"
+dual_memory_strategy: "hybrid_everywhere" 
+dual_memory_switch_layer: 3
+
+# --- Q-to-Ek STRATEGY FLAG ---
+# Defines the strategy for integrating the <Q-to-Ek> memory prompt.
+# Options: "query_bias", "output_bias", "masked_prefix", "pos_embed_prefix"
+q_to_ek_strategy: "query_bias"

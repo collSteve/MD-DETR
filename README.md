@@ -192,6 +192,8 @@ python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_
 # Dual Memory
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dual_mem_query_bias_mem_u_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_dual_memory_model=True
 
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dual_mem_phased_global_specific_3_output_bias_mem_u_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_dual_memory_model=True experiment.dual_memory_strategy=phased_global_specific experiment.q_to_ek_strategy=output_bias
+
 ```
 
 ```python
@@ -206,7 +208,34 @@ python -m analysis.distribution_analysis --base_dir /home/kren04/shield/MD_DETR_
 
 ```
 
-### New Weight Analysis:
+
+## Dual Memory Model:
+
+### Approach 1: "Hybrid Everywhere" (Default)
+
+This is now the default behavior of the dual-memory model.
+
+```
+python run.py run.local=true experiment=train_with_prompt experiment.exp_name=train_dual_mem_hybrid_everywhere experiment.use_dual_memory_model=True ...
+```
+
+### Approach 2: "Phased: Global -> Specific"
+
+This uses the <All> mechanism for the first 3 layers (0, 1, 2) and switches to <Q-to-Ek> for the last 3 layers (3, 4, 5).
+
+```
+python run.py run.local=true experiment=train_with_prompt experiment.exp_name=train_dual_mem_phased_global_specific experiment.use_dual_memory_model=True experiment.dual_memory_strategy=phased_global_specific experiment.dual_memory_switch_layer=3 ...
+```
+
+### Approach 3: "Phased: Hybrid -> Specific"
+
+This uses the hybrid mechanism for the first 3 layers and switches to only <Q-to-Ek> for the last 3.
+
+```
+python run.py run.local=true experiment=train_with_prompt experiment.exp_name=train_dual_mem_phased_hybrid_specific experiment.use_dual_memory_model=True experiment.dual_memory_strategy=phased_hybrid_specific experiment.dual_memory_switch_layer=3 ...
+```
+
+## New Weight Analysis:
 Here are some examples of how you can run it:
 
 1. Default Behavior (as before): Color by Task, Sort by Raw Value, Log Scale
@@ -224,4 +253,13 @@ python -m analysis.distribution_analysis --base_dir <your_exp_dir> --memory_map 
 
 ```
 python -m analysis.distribution_analysis --base_dir <your_exp_dir> --color_by index --no-log-scale --run_name "Experiment_B_Results"
+```
+
+### Distribution Analysis:
+```
+python -m analysis.distribution_analysis --base_dir /home/kren04/shield/MD_DETR_runs/validate_with_prompt_dyn_mem_debug_mode_with_img_id --memory_map "25,25,25,25" --no-log-scale --sort_by_abs --color_by task
+```
+
+```
+python -m analysis.distribution_analysis --base_dir /home/kren04/shield/MD_DETR_runs/validate_proposal_query_memory_l2_mem_u10_11.10_recorded --memory_map "10,10,10,10" --no-log-scale --sort_by_abs --color_by task --run_name "Experiment_Proposal_l2_m10_result"
 ```
