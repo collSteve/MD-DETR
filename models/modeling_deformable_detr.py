@@ -32,6 +32,8 @@ from models.memory.class_wise_dyn_memory import ClassWiseDynamicPrompt
 from models.memory.dyn_memory import DynamicPrompt
 from models.memory.experiment_prompt import ExperimentPrompt
 from models.memory.proposal_query_memory import ProposalQueryMemory
+from models.memory.simple_proposal_memory import SimpleProposalMemory
+from models.memory.focused_proposal_memory import FocusedProposalMemory
 from models.memory.task_specific_memory import TaskSpecificMemory
 from .prompt import Prompt, PromptParam
 
@@ -1609,8 +1611,12 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             #                              e_p_length=config.prompt_len, local_query=config.local_query)
             # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
             #                                 e_p_length=config.prompt_len, local_query=config.local_query)
-            self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=20, 
-                                            e_p_length=2, local_query=config.local_query)
+            # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=20, 
+            #                                 e_p_length=2, local_query=config.local_query)
+            # self.prompts = SimpleProposalMemory(emb_d = config.d_model, key_d = config.d_model, default_units=10, 
+            #                                 e_p_length=2, local_query=config.local_query)
+            self.prompts = FocusedProposalMemory(emb_d = config.d_model, key_d = config.d_model, default_units=10, 
+                                            e_p_length=2, local_query=config.local_query, focus=5.0)
 
         # Create input projection layers
         if config.num_feature_levels > 1:

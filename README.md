@@ -162,6 +162,10 @@ python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_
 
 
 # proposal query memory:
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_simple_qK_mem_u_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_softmax_cos_focus_5_mem_u_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
+
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_l_2_mem_units_20_ECHO_10 experiment.checkpoint_base="checkpoint09.pth" experiment.checkpoint_next="checkpoint09.pth"
 
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_l_2_mem_units_10_ECHO_t1_11_t234_10_correctness experiment.checkpoint_base="checkpoint10.pth" experiment.checkpoint_next="checkpoint09.pth"
