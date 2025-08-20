@@ -1,82 +1,94 @@
-# MD-DETR
-Memory-augmented Continual Detection Transformers (accepted in ECCV'24)
+# Proposal-Conditioned Memory for Continual Object Detection
+_A Deformable DETR–based, prompt-driven approach to continual object detection (CL-OD)._
 
-[![paper](https://img.shields.io/badge/paper-ECCV2024-cyan)](https://www.ecva.net/papers/eccv_2024/papers_ECCV/papers/11330.pdf)
+**Status:** Work-in-progress research repo  
+**Affiliation:** UBC Computer Vision Lab
 
+---
 
-<p align="center">
-    <img src="figs/mddetr.png" width="600px"/>
-</p>
+## Overview
 
-> **[Preventing Catastrophic Forgetting through
-Memory Networks in Continuous Detection](https://arxiv.org/pdf/2403.14797)**<br>
-> [Gaurav Bhatt*](https://gauravbh1010tt.github.io/), 
-[James Ross](https://www.jamesross.xyz/),
-[Leonid Sigal](https://www.cs.ubc.ca/~lsigal/)
-<br>
+We study **continual object detection**—learning a sequence of detection tasks **without** joint access to all past data—where models must adapt to new distributions while **retaining** prior knowledge. We build on **Deformable DETR** and introduce a **proposal-conditioned memory** design:
 
-> $Abstract$. Modern pre-trained architectures struggle to retain previous
-information while undergoing continuous fine-tuning on new tasks. Despite notable progress in continual classification, systems designed for
-complex vision tasks such as detection or segmentation still struggle to
-attain satisfactory performance. In this work, we introduce a memorybased detection transformer architecture to adapt a pre-trained DETRstyle detector to new tasks while preserving knowledge from previous
-tasks. We propose a novel localized query function for efficient information retrieval from memory units, aiming to minimize forgetting. Furthermore, we identify a fundamental challenge in continual detection
-referred to as background relegation. This arises when object categories
-from earlier tasks reappear in future tasks, potentially without labels,
-leading them to be implicitly treated as background. This is an inevitable issue in continual detection or segmentation. The introduced
-continual optimization technique effectively tackles this challenge. Finally, we assess the performance of our proposed system on continual
-detection benchmarks and demonstrate that our approach surpasses the
-performance of existing state-of-the-art resulting in 5-7% improvements
-on MS-COCO and PASCAL-VOC on the task of continual detection.
+- Each **object proposal (query token)** issues its own **memory query** (rather than a single image-level query).  
+- Retrieved knowledge is transformed into **prompts** and **injected** into the detector to guide decoding.  
+- We explore **aggregation** strategies (ALL / OWN / DUAL), a **task-gated** memory prior, and **key regularization** for stable memory selection.
 
-## Outline
+> In preliminary experiments, the proposal-conditioned family improves **early tasks**, with a regression on the **final task** that we are actively investigating (order sensitivity, gating calibration, aggregation schedules).
 
-- [MD-DETR](#mddetr)
-  - [Outline](#outline)
-  - [Installation](#installation)
-  - [Data Preparation](#data-preparation)
-  - [Training MD-DETR](#training-mddetr)
-  - [Evaluation](#evaluation)
-  - [Citation](#citation)
+---
 
+## Past Work and High-Level Architecture
+
+> A unified template covering both prior prompt-based CL detectors (e.g., MD/OMD-DETR) and this work.
+
+<img src="assets/poster/high_level.png" alt="High-level architecture" width="600px"/>
+
+*Image → Backbone → Transformer (queries) → Query Function → Memory Bank → Prompt Generator → Prompt Injection → Predictions*
+
+- **Query**: vector that asks the memory for relevant knowledge  
+- **Memory Bank**: stored task knowledge (key/value units)  
+- **Prompt**: compact, learned conditioning injected into the detector
+
+---
+
+## Key Contributions
+
+- **Proposal-wise memory retrieval**: instance-aligned selection via queries per object proposal.  
+- **Prompt-based conditioning**: retrieved knowledge becomes **prompts** that steer decoding.  
+- **Aggregation variants**: **ALL** (shared prompts), **OWN** (private per-proposal prompts), **DUAL** (shared + private per layer).  
+- **Task-gated memory (hierarchical prior)**: re-weights memory activations by estimated task affinity.  
+- **Key regularization**: orthogonality/distance regularizers to encourage unit specialization and stable retrieval.  
+- **Dynamic growth**: allow the memory bank to expand when needed (engineering).
+
+<img src="assets/poster/proposal_query_memoy.png" alt="High-level architecture" width="600px"/>
+
+*Proposal-wise memory*
+
+<img src="assets/poster/prefix_tuning.png" alt="Aggregation strategies" height="160px"/>
+<img src="assets/poster/self_aggregation.png" alt="Aggregation strategies" height="160px"/>
+
+*Aggregation strategies*
+
+<img src="assets/poster/cos_activation_and_regularization.png" alt="Cosine activation and regularization" width="600px"/>
+
+*Cosine activation and regularization*
+
+<img src="assets/poster/hirarchical_memory.png" alt="Hierarchical (Task Gated) Memory" width="600px"/>
+*Hierarchical (Task Gated) Memory*
+
+---
+
+## Background (for readers)
+
+- **Object detection**: classify + localize **multiple** objects per image; metric: **mAP@[.5:.95]**.  
+- **Continual learning (CL)**: learn tasks **sequentially**; must balance **plasticity** (adapt) and **stability** (retain).  
+- **Why CL-OD is hard**: many instances per image, proposal dynamics; forgetting impacts **localization** and **classification**.  
+- **DETR / Deformable DETR**: query-based **set prediction** with **sparse multi-scale attention**—a clean interface to inject prompts in CL.
+
+---
 
 ## Installation
-The code has been tested with the packages provided in the `requirement.txt` on Cuda 11.3 and Pytorch 1.12.1, etc. I have used `pip freeze > requirement.txt` to dump all the dependencies.
 
-## Data Preparation
-
-For MSCOCO provide the path to train, validation and annotation folder in the `run.sh` file. For quick pre-processing I have dumped all the annotation which can be downloaded from this link: [saved checkpoints](https://drive.google.com/file/d/1FZW7HfxkftAqwkmDBa5CmxxVhpxWxJDK/view?usp=sharing) (the link also contains checkpoints, logs, validation detection samples). The folder that would be needed for training is `upload/mscoco/` present in the uploaded folder. The `task_ann_dir` flag in `run.sh` should point to this folder.
-
-```bash 
-$ pip install gdown
-$ gdown 1FZW7HfxkftAqwkmDBa5CmxxVhpxWxJDK
-```
-
-## Training MD-DETR
-
-Set the flags in the `run.sh` file. The `train` flag should be 1.
+**Requirements**
+- Python ≥ 3.10, PyTorch ≥ 2.2, torchvision (CUDA-matched)
+- CUDA 11.8+ (or CPU for inspection), GCC ≥ 9 for deformable ops
+- Linux (Ubuntu 20.04/22.04 recommended)
 
 ```bash
-$ bash run.sh
+# clone
+git clone https://github.com/collSteve/MD-DETR.git
+cd MD-DETR
+
+# environment
+conda create -n clod python=3.10 -y
+conda activate clod
+
+# install deps
+pip install -r requirements.txt
 ```
 
-## Evaluation
-Set the flags and paths in the `run.sh` file. The `train` flag should be 0. Make sure to download all the checkpoints provided in the link: [saved checkpoints](https://drive.google.com/file/d/1FZW7HfxkftAqwkmDBa5CmxxVhpxWxJDK/view?usp=sharing)
-
-```bash
-$ bash run.sh
-```
-
-## Citation
-If you find this repo useful, please cite:
-```
-@article{bhatt2024preventing,
-  title={Preventing Catastrophic Forgetting through Memory Networks in Continuous Detection},
-  author={Bhatt, Gaurav and Ross, James and Sigal, Leonid},
-  journal={In ECCV 2024},
-  year={2024}
-}
-```
-
+---
 
 ## New Run:
 Run slurm schduler:
@@ -159,9 +171,18 @@ python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_
 
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dynamic_memory_correctness_from_2 experiment.start_task=2 experiment.checkpoint_base="checkpoint05.pth" 
 
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dynamic_memory_softmax_cos_focus_5_mem_u_25_pl_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dynamic_memory_L2_mem_u_25_pl_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
 
 
 # proposal query memory:
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_simple_qK_mem_u_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_softmax_cos_focus_5_mem_u_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_memory_L2_mem_u_10_pl_2_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
+
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_l_2_mem_units_20_ECHO_10 experiment.checkpoint_base="checkpoint09.pth" experiment.checkpoint_next="checkpoint09.pth"
 
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_l_2_mem_units_10_ECHO_t1_11_t234_10_correctness experiment.checkpoint_base="checkpoint10.pth" experiment.checkpoint_next="checkpoint09.pth"
@@ -179,7 +200,9 @@ python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_
 ## validate and record:
 python run.py run.local=true experiment=validate_with_prompt shared=shield experiment.exp_name=validate_proposal_query_memory_l2_mem_u10_11.10_recorded experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_proposal_query_memory_l_2_mem_units_10_ECHO_t1_11_t234_10_correctness/Task_1 experiment.checkpoint_next="checkpoint09.pth" experiment.checkpoint_base="checkpoint10.pth" experiment.record_probes=true
 
-python run.py run.local=true experiment=validate_with_prompt shared=shield experiment.exp_name=validate_proposal_query_memory_l2_mem_u10_11.10_recorded experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_proposal_query_memory_l_2_mem_units_10_ECHO_t1_11_t234_10_correctness/Task_1 experiment.checkpoint_next="checkpoint09.pth" experiment.checkpoint_base="checkpoint10.pth" experiment.record_probes=true
+python run.py run.local=true experiment=validate_with_prompt shared=shield experiment.exp_name=validate_proposal_query_memory_l2_mem_u10_epoch_6.10_query_record experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_proposal_query_memory_l_2_mem_units_10_ECHO_t1_11_t234_10_correctness/Task_1 experiment.checkpoint_next="checkpoint09.pth" experiment.checkpoint_base="checkpoint10.pth" experiment.record_probes=true
+
+python run.py run.local=true experiment=validate_with_prompt shared=shield experiment.exp_name=constancy_check_queries experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_proposal_query_memory_l_2_mem_units_10_ECHO_t1_11_t234_10_correctness/Task_1 experiment.checkpoint_next="checkpoint09.pth" experiment.checkpoint_base="checkpoint10.pth" experiment.record_queries=true experiment.start_task=1 experiment.n_tasks=2
 
 ## generate new training / validation sets:
 conda run -n MD-DETR python /home/kren04/shield/MD-DETR/generate_custom_task_order.py --output_dir /home/kren04/shield/MD_DETR_runs/upload/mscoco_reordered/ --order 1 2 4 3
@@ -191,6 +214,15 @@ python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_
 
 # Dual Memory
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dual_mem_query_bias_mem_u_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_dual_memory_model=True
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dual_mem_phased_global_specific_3_output_bias_mem_u_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_dual_memory_model=True experiment.dual_memory_strategy=phased_global_specific experiment.q_to_ek_strategy=output_bias
+
+# inspect query record
+conda run -n MD-DETR python /home/kren04/shield/MD-DETR/analysis/inspect_query_data.py --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries
+
+conda run -n MD-DETR python /home/kren04/shield/MD-DETR/analysis/verify_query_constancy.py --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries
+
+python -m analysis.verify_query_constancy --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries
 
 ```
 
@@ -206,7 +238,34 @@ python -m analysis.distribution_analysis --base_dir /home/kren04/shield/MD_DETR_
 
 ```
 
-### New Weight Analysis:
+
+## Dual Memory Model:
+
+### Approach 1: "Hybrid Everywhere" (Default)
+
+This is now the default behavior of the dual-memory model.
+
+```
+python run.py run.local=true experiment=train_with_prompt experiment.exp_name=train_dual_mem_hybrid_everywhere experiment.use_dual_memory_model=True ...
+```
+
+### Approach 2: "Phased: Global -> Specific"
+
+This uses the <All> mechanism for the first 3 layers (0, 1, 2) and switches to <Q-to-Ek> for the last 3 layers (3, 4, 5).
+
+```
+python run.py run.local=true experiment=train_with_prompt experiment.exp_name=train_dual_mem_phased_global_specific experiment.use_dual_memory_model=True experiment.dual_memory_strategy=phased_global_specific experiment.dual_memory_switch_layer=3 ...
+```
+
+### Approach 3: "Phased: Hybrid -> Specific"
+
+This uses the hybrid mechanism for the first 3 layers and switches to only <Q-to-Ek> for the last 3.
+
+```
+python run.py run.local=true experiment=train_with_prompt experiment.exp_name=train_dual_mem_phased_hybrid_specific experiment.use_dual_memory_model=True experiment.dual_memory_strategy=phased_hybrid_specific experiment.dual_memory_switch_layer=3 ...
+```
+
+## New Weight Analysis:
 Here are some examples of how you can run it:
 
 1. Default Behavior (as before): Color by Task, Sort by Raw Value, Log Scale
@@ -224,4 +283,13 @@ python -m analysis.distribution_analysis --base_dir <your_exp_dir> --memory_map 
 
 ```
 python -m analysis.distribution_analysis --base_dir <your_exp_dir> --color_by index --no-log-scale --run_name "Experiment_B_Results"
+```
+
+### Distribution Analysis:
+```
+python -m analysis.distribution_analysis --base_dir /home/kren04/shield/MD_DETR_runs/validate_with_prompt_dyn_mem_debug_mode_with_img_id --memory_map "25,25,25,25" --no-log-scale --sort_by_abs --color_by task
+```
+
+```
+python -m analysis.distribution_analysis --base_dir /home/kren04/shield/MD_DETR_runs/validate_proposal_query_memory_l2_mem_u10_11.10_recorded --memory_map "10,10,10,10" --no-log-scale --sort_by_abs --color_by task --run_name "Experiment_Proposal_l2_m10_result"
 ```

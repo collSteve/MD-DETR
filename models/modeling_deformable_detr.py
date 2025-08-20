@@ -32,6 +32,11 @@ from models.memory.class_wise_dyn_memory import ClassWiseDynamicPrompt
 from models.memory.dyn_memory import DynamicPrompt
 from models.memory.experiment_prompt import ExperimentPrompt
 from models.memory.proposal_query_memory import ProposalQueryMemory
+from models.memory.simple_proposal_memory import SimpleProposalMemory
+from models.memory.focused_proposal_memory import FocusedProposalMemory
+from models.memory.focused_dynamic_memory import FocusedDynamicPrompt
+from models.memory.l2_proposal_memory import L2ProposalMemory
+from models.memory.l2_dynamic_memory import L2DynamicPrompt
 from models.memory.task_specific_memory import TaskSpecificMemory
 from .prompt import Prompt, PromptParam
 
@@ -1596,21 +1601,33 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         self.backbone = DeformableDetrConvModel(backbone, position_embeddings)
 
         if config.use_prompts:
-            # self.prompts = ExperimentPrompt(emb_d=config.d_model, n_tasks=config.n_tasks, 
-            #                         prompt_param=PromptParam(e_pool_size=config.num_prompts,
-            #                                                 e_p_length=config.prompt_len),
-            #                         #  prompt_param=[config.num_prompts,config.prompt_len,0],
-            #                          key_dim=config.d_model, args=config)
-            # self.prompts = DynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
-            #                              e_p_length=config.prompt_len, local_query=config.local_query)
-            # self.prompts = ClassWiseDynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=5, 
-            #                                         e_p_length=config.prompt_len, local_query=config.local_query)
-            # self.prompts = TaskSpecificMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
-            #                              e_p_length=config.prompt_len, local_query=config.local_query)
-            # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25, 
-            #                                 e_p_length=config.prompt_len, local_query=config.local_query)
-            self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=20, 
-                                            e_p_length=2, local_query=config.local_query)
+            # self.prompts = ExperimentPrompt(emb_d=config.d_model, n_tasks=config.n_tasks,                                                                                       │
+            #                         prompt_param=PromptParam(e_pool_size=config.num_prompts,                                                                                    │
+            #                                                 e_p_length=config.prompt_len),                                                                                      │
+            #                         #  prompt_param=[config.num_prompts,config.prompt_len,0],                                                                                   │
+            #                          key_dim=config.d_model, args=config)                                                                                                       │
+            # self.prompts = DynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=25,                                                                      │
+            #                              e_p_length=config.prompt_len, local_query=config.local_query)                                                                          │
+            # self.prompts = ClassWiseDynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=5,                                                              │
+            #                                         e_p_length=config.prompt_len, local_query=config.local_query)                                                               │
+            # self.prompts = TaskSpecificMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25,                                                                 │
+            #                              e_p_length=config.prompt_len, local_query=config.local_query)                                                                          │
+            # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25,                                                                │
+            #                                 e_p_length=config.prompt_len, local_query=config.local_query)                                                                       │
+            # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=20,                                                                │
+            #                                 e_p_length=2, local_query=config.local_query)                                                                                       │
+            # self.prompts = SimpleProposalMemory(emb_d = config.d_model, key_d = config.d_model, default_units=10,                                                               │
+            #                                 e_p_length=2, local_query=config.local_query)                                                                                       │
+            # self.prompts = FocusedProposalMemory(emb_d = config.d_model, key_d = config.d_model, default_units=10,                                                                │
+            #                                 e_p_length=2, local_query=config.local_query, focus=5.0)
+
+            # self.prompts = FocusedDynamicPrompt(emb_d=config.d_model, key_d=config.d_model, default_units=25, 
+            #                                     e_p_length=10, local_query=config.local_query, focus=5.0)
+
+            # self.prompts = L2ProposalMemory(emb_d=config.d_model, key_d=config.d_model, default_units=10,
+            #                                       e_p_length=2, local_query=config.local_query)
+            self.prompts = L2DynamicPrompt(emb_d=config.d_model, key_d=config.d_model, default_units=25, 
+                                               e_p_length=2, local_query=config.local_query)
 
         # Create input projection layers
         if config.num_feature_levels > 1:

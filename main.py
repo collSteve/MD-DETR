@@ -223,6 +223,15 @@ def get_args_parser():
     parser.add_argument('--use_dual_memory_model', action='store_true',
                         help="Use the experimental dual memory model.")
 
+    # Dual memory strategy flags
+    parser.add_argument('--dual_memory_strategy', type=str, default='hybrid_everywhere',
+                        help="Strategy for the dual memory model.")
+    parser.add_argument('--dual_memory_switch_layer', type=int, default=3,
+                        help="Layer to switch strategies in phased approaches.")
+
+    parser.add_argument('--q_to_ek_strategy', type=str, default='query_bias',
+                        help="Strategy for the Q-to-Ek memory module.")
+
     return parser
 
 def main(args):
