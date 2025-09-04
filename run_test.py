@@ -63,9 +63,6 @@ def main(cfg: DictConfig):
     if cfg.experiment.record_queries:
         common.append("--record_queries")
 
-    if cfg.experiment.use_query_loss:
-        common.append("--use_query_loss")
-
     # --- Correspondence embedding flags to the CLI call if they are true ---
     if cfg.experiment.get("use_correspondence_embedding", False):
         common.append("--use_correspondence_embedding")
@@ -103,7 +100,7 @@ def main(cfg: DictConfig):
         "python",
         # "--nnodes",          str(cfg.sbatch.nodes),
         # "--nproc_per_node",  str(cfg.sbatch.gpus_per_node),
-        "main.py",
+        "main_test.py",
     ] + common + mode
 
     is_submitit_worker = os.environ.get("SUBMITIT_EXECUTOR") == "slurm"

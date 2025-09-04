@@ -49,31 +49,25 @@ class local_trainer(pl.LightningModule):
 	def __init__(self, train_loader, val_loader, test_dataset, args, local_evaluator, task_id, eval_mode=False):
 		super().__init__()
 
+		# --- Main Model Initialization ---
 		detr_config = DeformableDetrConfig()
 		detr_config.num_labels = args.n_classes #+ 1
 		detr_config.PREV_INTRODUCED_CLS = args.task_map[task_id][1]
 		detr_config.CUR_INTRODUCED_CLS = args.task_map[task_id][2]
 		seen_classes = detr_config.PREV_INTRODUCED_CLS + detr_config.CUR_INTRODUCED_CLS
 		
-		#### prompt arguments
 		detr_config.use_prompts = args.use_prompts
 		detr_config.n_tasks = args.n_tasks
 		detr_config.num_prompts = args.num_prompts
 		detr_config.prompt_len = args.prompt_len
 		detr_config.local_query = args.local_query
-
-		# --- Propagate correspondence embedding flags to the model config ---
 		detr_config.use_correspondence_embedding = args.use_correspondence_embedding
 		detr_config.use_positional_embedding_for_correspondence = args.use_positional_embedding_for_correspondence
-		
-		# --- Propagate dual memory strategy flags to the model config ---
 		detr_config.dual_memory_strategy = args.dual_memory_strategy
 		detr_config.dual_memory_switch_layer = args.dual_memory_switch_layer
 		detr_config.q_to_ek_strategy = args.q_to_ek_strategy
-		# --- End of change ---
 
-		self.invalid_cls_logits = list(range(seen_classes, args.n_classes-1)) #unknown class indx will not be included in the invalid class range
-
+		self.invalid_cls_logits = list(range(seen_classes, args.n_classes-1))
 		ModelClass = get_model_class(args.use_dual_memory_model)
 
 		if args.repo_name:
@@ -86,62 +80,46 @@ class local_trainer(pl.LightningModule):
 												 log_file=args.log_file)
 			self.processor = DeformableDetrImageProcessor()
 
-		# --- DUAL MEMORY / SINGLE MEMORY INITIALIZATION ---
-		if args.use_dual_memory_model:
-			# Handle dual memory initialization
-			prompts_all = self.model.model.prompts_all
-			prompts_q_to_ek = self.model.model.prompts_q_to_ek
-			for tid in range(1, task_id + 1):
-				prompts_all.initialize_for_task(tid)
-				prompts_q_to_ek.initialize_for_task(tid)
-			prompts_all.set_task_id(task_id - 1)
-			prompts_q_to_ek.set_task_id(task_id - 1)
-			prompts_all.reset_parameters()
-			prompts_q_to_ek.reset_parameters()
-			self.prompts = None # Ensure single prompt logic is not triggered
-		elif getattr(self.model.model, 'prompts', None):
-			# Handle single memory initialization (backward compatibility)
+		# --- Query Function Model Initialization (NEW) ---
+		print("--- [ENGINE_TEST] Initializing separate, frozen query function model ---")
+		query_fn_config = deepcopy(detr_config)
+		query_fn_config.use_prompts = False # Ensure it's a vanilla DETR
+		
+		QueryFnModelClass = get_model_class(False) # Always use the standard model for the query function
+
+		if args.repo_name:
+			self.query_function_model = QueryFnModelClass.from_pretrained(args.repo_name, config=query_fn_config,
+																		  ignore_mismatched_sizes=True)
+		else:
+			self.query_function_model = QueryFnModelClass(query_fn_config)
+		
+		# Freeze the entire query function model
+		for param in self.query_function_model.parameters():
+			param.requires_grad = False
+		self.query_function_model.eval()
+		print("--- [ENGINE_TEST] Query function model is frozen. ---")
+
+		# --- Rest of __init__ ---
+		if getattr(self.model.model, 'prompts', None):
 			prompts = self.model.model.prompts
 			if isinstance(prompts, ClassWiseDynamicPrompt):
-				# get all classes present in current task
 				object_class_names = []
 				for tid in range(1, task_id+1):
-					class_names, start_idx, num_classes = args.task_map[tid]
+					class_names, _, _ = args.task_map[tid]
 					object_class_names.extend(class_names)
-
-				# standardize class names
 				stadardized_object_class_names = [stardardize_object_class_name(name) for name in object_class_names]
-				
-				print(f"object classes for task {task_id}: {stadardized_object_class_names}")
-
 				prompts.initialize_for_task(task_id, object_classes=stadardized_object_class_names)
-
 			else:
 				for tid in range(1, task_id+1):
 						prompts.initialize_for_task(tid)
-
 			prompts.set_task_id(task_id - 1)
 			prompts.reset_parameters()
-			self.prompts = prompts # Set for use in other parts of the trainer
+			self.prompts = prompts
 
 		find_param_nans(self.model)
 
-		# --- PRINT ALL PARAMETER NAMES ---
-		# print("\n\n--- Model Parameters ---")
-		# for name, p in self.model.named_parameters():
-		# 	print(f"{name:<100} | Requires Grad: {p.requires_grad}")
-		# print("--- End of Model Parameters ---\n\n")
-		# --- END OF PRINT ---
-
-		self.prompts = getattr(self.model.model, "prompts", None)
-
-		# set debug
-		self.mem_probe = MemoryProbe(
-            out_dir=f"{args.output_dir}/mem_trace/mem_traces_task{task_id}")
-		self.query_probe = QueryProbe(
-            out_dir=f"{args.output_dir}/query_probe/query_traces_task{task_id}")
-		
-
+		self.mem_probe = MemoryProbe(out_dir=f"{args.output_dir}/mem_trace/mem_traces_task{task_id}")
+		self.query_probe = QueryProbe(out_dir=f"{args.output_dir}/query_probe/query_traces_task{task_id}")
 		
 		self.task_id = task_id
 		self.lr = args.lr
@@ -222,7 +200,7 @@ class local_trainer(pl.LightningModule):
 		
 		if self.args.use_prompts:
 			with torch.no_grad():
-				outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels,  train=False, task_id=self.task_id, switch_off_prompts=True)
+				outputs = self.query_function_model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels,  train=False, task_id=self.task_id)
 
 				if not self.args.local_query:
 					query = outputs.last_hidden_state.mean(dim=1)
@@ -251,10 +229,8 @@ class local_trainer(pl.LightningModule):
 						for j in ind[0]:
 							one_hot_proposals[i][j] = 1
 
-					if self.args.use_query_loss:
-						# print("Using query loss")
-						query_wt = self.model.model.prompts.query_tf(query.view(query.shape[0],-1))
-						query_loss = F.cross_entropy(query_wt, one_hot_proposals)
+					query_wt = self.model.model.prompts.query_tf(query.view(query.shape[0],-1))
+					query_loss = F.cross_entropy(query_wt, one_hot_proposals)
 					
 				if self.args.bg_thres and not return_outputs:
 					results = self.processor.post_process(outputs, target_sizes=orig_target_sizes, bg_thres_topk=self.args.bg_thres_topk)
@@ -292,7 +268,7 @@ class local_trainer(pl.LightningModule):
 		loss = outputs.loss
 		loss_dict = outputs.loss_dict
 
-		if self.args.local_query and self.args.use_prompts and self.args.use_query_loss:
+		if self.args.local_query and self.args.use_prompts:
 		# if self.args.local_query:
 			loss_dict['query_loss'] = query_loss
 
@@ -378,11 +354,16 @@ class local_trainer(pl.LightningModule):
 					#'args': self.args,
 				}, os.path.join(self.args.output_dir, f'checkpoint{epoch:02}.pth'))
 	
+
+	
 	def resume(self, load_path=''):
 		print('\n Resuming model for task ', self.task_id, ' from : ',load_path, file=self.args.log_file)
 		if load_path:
 			checkpoint = torch.load(load_path, map_location='cpu')
-			missing_keys, unexpected_keys = self.model.load_state_dict(checkpoint['model'], strict=False)
+			# Load state into the main training model
+			self.model.load_state_dict(checkpoint['model'], strict=False)
+			# Do NOT load the same state into the frozen query function model
+			# self.query_function_model.load_state_dict(checkpoint['model'], strict=False)
 
 		if not self.args.eval and self.args.freeze:
 			

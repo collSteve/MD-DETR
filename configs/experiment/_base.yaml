@@ -20,7 +20,7 @@ bg_thres_topk:       5
 lambda_query:        0.1
 
 repo_name:           SenseTime/deformable-detr
-freeze:              backbone,encoder,decoder
+freeze:              backbone,encoder,decoder,
 new_params:          class_embed,prompts
 viz:                 --viz
 
@@ -48,3 +48,8 @@ dual_memory_switch_layer: 3
 # Defines the strategy for integrating the <Q-to-Ek> memory prompt.
 # Options: "query_bias", "output_bias", "masked_prefix", "pos_embed_prefix"
 q_to_ek_strategy: "query_bias"
+
+
+record_queries:  false
+
+use_query_loss: true

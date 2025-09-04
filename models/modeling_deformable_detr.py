@@ -1601,24 +1601,24 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         self.backbone = DeformableDetrConvModel(backbone, position_embeddings)
 
         if config.use_prompts:
-            # self.prompts = ExperimentPrompt(emb_d=config.d_model, n_tasks=config.n_tasks,                                                                                       │
-            #                         prompt_param=PromptParam(e_pool_size=config.num_prompts,                                                                                    │
-            #                                                 e_p_length=config.prompt_len),                                                                                      │
-            #                         #  prompt_param=[config.num_prompts,config.prompt_len,0],                                                                                   │
-            #                          key_dim=config.d_model, args=config)                                                                                                       │
-            # self.prompts = DynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=25,                                                                      │
-            #                              e_p_length=config.prompt_len, local_query=config.local_query)                                                                          │
-            # self.prompts = ClassWiseDynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=5,                                                              │
-            #                                         e_p_length=config.prompt_len, local_query=config.local_query)                                                               │
-            # self.prompts = TaskSpecificMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25,                                                                 │
-            #                              e_p_length=config.prompt_len, local_query=config.local_query)                                                                          │
-            # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25,                                                                │
-            #                                 e_p_length=config.prompt_len, local_query=config.local_query)                                                                       │
-            # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=20,                                                                │
-            #                                 e_p_length=2, local_query=config.local_query)                                                                                       │
-            # self.prompts = SimpleProposalMemory(emb_d = config.d_model, key_d = config.d_model, default_units=10,                                                               │
-            #                                 e_p_length=2, local_query=config.local_query)                                                                                       │
-            # self.prompts = FocusedProposalMemory(emb_d = config.d_model, key_d = config.d_model, default_units=10,                                                                │
+            # self.prompts = ExperimentPrompt(emb_d=config.d_model, n_tasks=config.n_tasks,
+            #                         prompt_param=PromptParam(e_pool_size=config.num_prompts,
+            #                                                 e_p_length=config.prompt_len),
+            #                         #  prompt_param=[config.num_prompts,config.prompt_len,0],
+            #                          key_dim=config.d_model, args=config)
+            # self.prompts = DynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=25,
+            #                              e_p_length=config.prompt_len, local_query=config.local_query)
+            # self.prompts = ClassWiseDynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=5,
+            #                                         e_p_length=config.prompt_len, local_query=config.local_query)
+            # self.prompts = TaskSpecificMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25,
+            #                              e_p_length=config.prompt_len, local_query=config.local_query)
+            # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=20,
+            #                                 e_p_length=config.prompt_len, local_query=config.local_query)
+            # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=10,
+            #                                 e_p_length=2, local_query=config.local_query)
+            self.prompts = SimpleProposalMemory(emb_d = config.d_model, key_d = config.d_model, default_units=10,
+                                            e_p_length=2, local_query=config.local_query)
+            # self.prompts = FocusedProposalMemory(emb_d = config.d_model, key_d = config.d_model, default_units=10,
             #                                 e_p_length=2, local_query=config.local_query, focus=5.0)
 
             # self.prompts = FocusedDynamicPrompt(emb_d=config.d_model, key_d=config.d_model, default_units=25, 
@@ -1626,8 +1626,8 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
 
             # self.prompts = L2ProposalMemory(emb_d=config.d_model, key_d=config.d_model, default_units=10,
             #                                       e_p_length=2, local_query=config.local_query)
-            self.prompts = L2DynamicPrompt(emb_d=config.d_model, key_d=config.d_model, default_units=25, 
-                                               e_p_length=2, local_query=config.local_query)
+            # self.prompts = L2DynamicPrompt(emb_d=config.d_model, key_d=config.d_model, default_units=25, 
+            #                                    e_p_length=2, local_query=config.local_query)
 
         # Create input projection layers
         if config.num_feature_levels > 1:
@@ -1786,6 +1786,7 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         train=False,
         task_id=0,
         class_labels=None,
+        switch_off_prompts=False,
     ) -> Union[Tuple[torch.FloatTensor], DeformableDetrModelOutput]:
         r"""
         Returns:
@@ -1939,7 +1940,7 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             init_reference_points = reference_points
 
         #import pdb; pdb.set_trace()
-        if self.config.use_prompts:
+        if self.config.use_prompts and not switch_off_prompts:
             prompts = self.prompts
         else:
             prompts = None
@@ -2098,6 +2099,7 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
         query = None,
         train = False,
         task_id = None,
+        switch_off_prompts=False,
     ) -> Union[Tuple[torch.FloatTensor], DeformableDetrObjectDetectionOutput]:
         r"""
         labels (`List[Dict]` of len `(batch_size,)`, *optional*):
@@ -2147,10 +2149,11 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
 
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        if labels is not None:
-            self.model.prompts.set_image_ids([label["image_id"] for label in labels])
-        else:
-            self.model.prompts.set_image_ids(None)
+        if hasattr(self.model, 'prompts') and self.model.prompts is not None: 
+            if labels is not None:
+                self.model.prompts.set_image_ids([label["image_id"] for label in labels])
+            else:
+                self.model.prompts.set_image_ids(None)
 
         # First, sent images through DETR base model to obtain encoder + decoder outputs
         outputs = self.model(
@@ -2167,6 +2170,7 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
             train=train,
             task_id=task_id,
             class_labels=None if labels is None else [label["class_labels"] for label in labels],
+            switch_off_prompts=switch_off_prompts,
         )
 
         #pdb.set_trace()

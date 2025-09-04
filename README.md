@@ -166,6 +166,9 @@ python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_2_l_10_mem_units_ECHO_10 experiment.start_task=2 experiment.checkpoint_next="checkpoint09.pth"
 
 
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_2_l_10_mem_units_ECHO_10 experiment.start_task=2 experiment.checkpoint_next="checkpoint09.pth"
+
+
 
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dynamic_memory_correctness_2
 
@@ -175,9 +178,22 @@ python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_
 
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dynamic_memory_L2_mem_u_25_pl_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
 
+# dynamic memory:
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dynamic_memory_epoch_6_frozen_qn experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
+
+python run_test.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dynamic_memory_epoch_6_frozen_qn experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
 
 # proposal query memory:
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_pqm_u_10_epoch_6_no_query_loss experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_query_loss=False
+
+python run_test.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_u_10_epoch_6_frozen_qn experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
+
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_simple_qK_mem_u_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
+
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_pqm_simple_qK_mem_u_10_epoch_10 experiment.checkpoint_base="checkpoint09.pth" experiment.checkpoint_next="checkpoint09.pth"
+
+python run_test.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_pqm_simple_qK_mem_u_10_epoch_6_frozen_qn experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
 
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_softmax_cos_focus_5_mem_u_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
 
@@ -212,17 +228,41 @@ python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_
 
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_pqm_mem_unit_10_learnable_corr_embed experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_correspondence_embedding=True
 
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_pqm_mem_unit_10_learnable_corr_embed_frozen_qn experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_correspondence_embedding=True
+
 # Dual Memory
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dual_mem_query_bias_mem_u_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_dual_memory_model=True
 
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dual_mem_phased_global_specific_3_output_bias_mem_u_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_dual_memory_model=True experiment.dual_memory_strategy=phased_global_specific experiment.q_to_ek_strategy=output_bias
 
 # inspect query record
+python run_test.py run.local=true experiment=validate_with_frozen_query_fn shared=shield experiment.exp_name=validate_frozen_separated_qn experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_proposal_query_memory_l_2_mem_units_10_ECHO_t1_11_t234_10_correctness/Task_1 experiment.checkpoint_next="checkpoint09.pth" experiment.checkpoint_base="checkpoint10.pth" experiment.start_task=1 experiment.n_tasks=2 experiment.record_queries=true
+
+python run_test.py run.local=true experiment=validate_with_prompt shared=shield experiment.exp_name=validate_frozen_separated_qn_v_w_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_proposal_query_memory_l_2_mem_units_10_ECHO_t1_11_t234_10_correctness/Task_1 experiment.checkpoint_next="checkpoint09.pth" experiment.checkpoint_base="checkpoint10.pth" experiment.start_task=1 experiment.n_tasks=2 experiment.record_queries=true
+
 conda run -n MD-DETR python /home/kren04/shield/MD-DETR/analysis/inspect_query_data.py --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries
 
 conda run -n MD-DETR python /home/kren04/shield/MD-DETR/analysis/verify_query_constancy.py --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries
 
 python -m analysis.verify_query_constancy --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries
+
+
+## new 
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_pqm_simple_qK_mem_u_10_epoch_10 experiment.checkpoint_base="checkpoint09.pth" experiment.checkpoint_next="checkpoint09.pth"
+
+python run_test.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dynamic_memory_epoch_6_query_loss_frozen_qn experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" 
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_pqm_u_10_epoch_6_no_query_loss experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_query_loss=False
+
+
+### frozen queries:
+/home/kren04/shield/MD_DETR_runs/constancy_frozen_separated_qn2
+/home/kren04/shield/MD_DETR_runs/validate_frozen_separated_qn_v_w_prompt
+
+## visualize queries
+python -m analysis.visualize_query_geometry --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries --plot_type centroid --num_images 8  --output_dir outputs/analysis/dynamic_queries
+
+python -m analysis.visualize_query_geometry --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries --plot_type full --num_images 3  --output_dir outputs/analysis/dynamic_queries
 
 ```
 

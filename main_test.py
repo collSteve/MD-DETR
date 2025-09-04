@@ -19,7 +19,7 @@ from models.probes.memory_probe import DebugAttribute
 import utils
 import pytorch_lightning as pl
 from datasets.coco_eval import CocoEvaluator
-from engine import local_trainer, Evaluator
+from engine_test2 import local_trainer, Evaluator
 # from transformers import AutoImageProcessor
 from lightning.pytorch.loggers import CSVLogger
 from lightning.pytorch import seed_everything
@@ -206,10 +206,6 @@ def get_args_parser():
                         help='Threshold for considering a detection as background')
     parser.add_argument('--bg_thres_topk', default=5, type=int, 
                         help='Top-K background detections to consider')
-    
-    # query loss
-    parser.add_argument('--use_query_loss', action='store_true', 
-                        help="Enable query loss for training")
 
     # Pretrained model loading
     parser.add_argument('--big_pretrained', default="", type=str, 
