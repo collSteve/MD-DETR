@@ -26,7 +26,15 @@ except ImportError:
     sys.exit(1)
 
 
-def draw_task_progression_arrows(ax, plot_df, plot_type):
+# Linestyle mapping for different target context types
+ARROW_LINESTYLE_MAP = {
+    'cur': '-',      # Solid: Current task validation (T1-cur → T2-cur)
+    'prev': '--',    # Dashed: Previous tasks validation (T1-cur → T2-prev)
+    'all': ':',      # Dotted: All tasks validation (T1-cur → T2-all)
+}
+
+
+def draw_task_progression_arrows(ax, plot_df, plot_type, color_mapping):
     """
     Draw arrows from T{N}-cur contexts to T{N+1} contexts for each image.
 
@@ -80,12 +88,21 @@ def draw_task_progression_arrows(ax, plot_df, plot_type):
                     x_end = next_point['UMAP_1']
                     y_end = next_point['UMAP_2']
 
+                    # Extract target tag for linestyle
+                    target_match = re.match(r'T(\d+)-(.+)', next_point['context'])
+                    target_tag = target_match.group(2) if target_match else 'cur'
+                    linestyle = ARROW_LINESTYLE_MAP.get(target_tag, '-')
+
+                    # Get color for this image
+                    arrow_color = color_mapping.get(str(img_id), 'gray')
+
                     ax.annotate('',
                                xy=(x_end, y_end),
                                xytext=(x_start, y_start),
                                arrowprops=dict(
                                    arrowstyle='->',
-                                   color='gray',
+                                   color=arrow_color,      # Use image's color
+                                   linestyle=linestyle,     # Use target-based linestyle
                                    lw=1.5,
                                    alpha=0.4,
                                    shrinkA=5,
@@ -137,15 +154,24 @@ def draw_task_progression_arrows(ax, plot_df, plot_type):
                         x_end = next_query.iloc[0]['UMAP_1']
                         y_end = next_query.iloc[0]['UMAP_2']
 
-                        # Draw arrow with subtle styling (many arrows!)
+                        # Extract target tag for linestyle
+                        target_match = re.match(r'T(\d+)-(.+)', next_context)
+                        target_tag = target_match.group(2) if target_match else 'cur'
+                        linestyle = ARROW_LINESTYLE_MAP.get(target_tag, '-')
+
+                        # Get color for this image
+                        arrow_color = color_mapping.get(img_id, 'gray')
+
+                        # Draw arrow with image-specific color and context-specific linestyle
                         ax.annotate('',
                                    xy=(x_end, y_end),
                                    xytext=(x_start, y_start),
                                    arrowprops=dict(
                                        arrowstyle='->',
-                                       color='gray',
-                                       lw=0.3,      # Thin lines
-                                       alpha=0.15,  # Very transparent
+                                       color=arrow_color,   # Use image's color
+                                       linestyle=linestyle,  # Use target-based linestyle
+                                       lw=0.3,              # Thin lines
+                                       alpha=0.15,          # Very transparent
                                        shrinkA=2,
                                        shrinkB=2
                                    ))
@@ -282,7 +308,12 @@ def visualize_queries(exp_dir: str, output_dir: str, num_images: int, plot_type:
     # Draw task progression arrows if requested
     if draw_arrows:
         print("Drawing task progression arrows...")
-        draw_task_progression_arrows(ax, plot_df, plot_type)
+        # Create color mapping for arrows (same colors as scatter points)
+        unique_image_ids = plot_df['image_id'].unique()
+        palette = sns.color_palette(n_colors=len(unique_image_ids))
+        color_mapping = {str(img_id): palette[i] for i, img_id in enumerate(unique_image_ids)}
+
+        draw_task_progression_arrows(ax, plot_df, plot_type, color_mapping)
 
     ax.set_title(f"UMAP Visualization of Object Queries ({plot_type.capitalize()} Plot)", fontsize=18)
     ax.set_xlabel("UMAP Dimension 1", fontsize=12)
