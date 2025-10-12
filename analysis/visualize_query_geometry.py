@@ -48,8 +48,27 @@ def visualize_queries(exp_dir: str, output_dir: str, num_images: int, plot_type:
 
     print(f"Found {len(pkl_files)} data files. Loading records...")
     for file_path in tqdm(pkl_files, desc="Loading Files"):
+        # Extract tag from filename
+        filename = os.path.basename(file_path)
+        parts = filename.split('_')
+
+        # Parse tag with error handling
+        try:
+            tag_idx = parts.index('tag')
+            if tag_idx + 1 < len(parts):
+                tag = parts[tag_idx + 1]
+            else:
+                tag = 'unknown'
+        except (ValueError, IndexError):
+            # Filename doesn't follow expected format
+            tag = 'unknown'
+
+        # Load records and attach tag
         with open(file_path, 'rb') as f:
-            all_records.extend(pickle.load(f))
+            records = pickle.load(f)
+            for r in records:
+                r.tag = tag  # Dynamically add tag attribute
+            all_records.extend(records)
 
     # 2. Group records by image_id and identify overlapping images
     records_by_image = defaultdict(list)
