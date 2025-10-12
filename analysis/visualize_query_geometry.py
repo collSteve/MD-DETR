@@ -29,75 +29,126 @@ except ImportError:
 def draw_task_progression_arrows(ax, plot_df, plot_type):
     """
     Draw arrows from T{N}-cur contexts to T{N+1} contexts for each image.
-    This visualizes how queries change (or stay constant) across task progressions.
 
-    For 'full' plots with 300 queries per context, computes centroids to avoid
-    visual clutter from thousands of arrows.
+    For 'centroid' plots: Draw one arrow per context pair.
+    For 'full' plots: Draw arrows from query[i] in T{N}-cur to query[i] in T{N+1} contexts,
+                      maintaining index correspondence across all 300 queries.
 
     Args:
         ax: matplotlib axis object
         plot_df: pandas DataFrame with columns ['UMAP_1', 'UMAP_2', 'image_id', 'context']
+                 For full plots, also includes 'query_idx' column
         plot_type: 'centroid' or 'full'
     """
-    # Compute centroids for each (image_id, context) combination
-    # This ensures we draw one arrow per context pair, not 300 arrows
-    centroids = plot_df.groupby(['image_id', 'context']).agg({
-        'UMAP_1': 'mean',
-        'UMAP_2': 'mean'
-    }).reset_index()
 
-    # Process each image separately
-    for img_id in centroids['image_id'].unique():
-        img_centroids = centroids[centroids['image_id'] == img_id]
+    if plot_type == 'centroid':
+        # Use existing centroid-based logic (works correctly)
+        centroids = plot_df.groupby(['image_id', 'context']).agg({
+            'UMAP_1': 'mean',
+            'UMAP_2': 'mean'
+        }).reset_index()
 
-        # Group contexts by task number for this image
-        tasks = {}
-        for _, row in img_centroids.iterrows():
-            # Parse "T2-cur" → task_num=2, tag="cur"
-            match = re.match(r'T(\d+)-(.+)', row['context'])
-            if match:
-                task_num = int(match.group(1))
-                if task_num not in tasks:
-                    tasks[task_num] = []
-                tasks[task_num].append(row)
+        for img_id in centroids['image_id'].unique():
+            img_centroids = centroids[centroids['image_id'] == img_id]
 
-        # Draw arrows from T{N}-cur to all T{N+1} contexts
-        for task_num in sorted(tasks.keys()):
-            next_task = task_num + 1
+            # Group contexts by task number
+            tasks = {}
+            for _, row in img_centroids.iterrows():
+                match = re.match(r'T(\d+)-(.+)', row['context'])
+                if match:
+                    task_num = int(match.group(1))
+                    if task_num not in tasks:
+                        tasks[task_num] = []
+                    tasks[task_num].append(row)
 
-            # Check if next task exists for this image
-            if next_task not in tasks:
-                continue
+            # Draw arrows from T{N}-cur to all T{N+1} contexts
+            for task_num in sorted(tasks.keys()):
+                next_task = task_num + 1
+                if next_task not in tasks:
+                    continue
 
-            # Find the T{N}-cur point (source of arrows)
-            cur_context = f'T{task_num}-cur'
-            cur_points = [r for r in tasks[task_num] if r['context'] == cur_context]
+                cur_context = f'T{task_num}-cur'
+                cur_points = [r for r in tasks[task_num] if r['context'] == cur_context]
+                if not cur_points:
+                    continue
 
-            # Skip if this image doesn't have T{N}-cur context
-            if not cur_points:
-                continue
+                cur_point = cur_points[0]
+                x_start = cur_point['UMAP_1']
+                y_start = cur_point['UMAP_2']
 
-            cur_point = cur_points[0]
-            x_start = cur_point['UMAP_1']
-            y_start = cur_point['UMAP_2']
+                for next_point in tasks[next_task]:
+                    x_end = next_point['UMAP_1']
+                    y_end = next_point['UMAP_2']
 
-            # Draw arrows to all T{N+1} contexts
-            for next_point in tasks[next_task]:
-                x_end = next_point['UMAP_1']
-                y_end = next_point['UMAP_2']
+                    ax.annotate('',
+                               xy=(x_end, y_end),
+                               xytext=(x_start, y_start),
+                               arrowprops=dict(
+                                   arrowstyle='->',
+                                   color='gray',
+                                   lw=1.5,
+                                   alpha=0.4,
+                                   shrinkA=5,
+                                   shrinkB=5
+                               ))
 
-                # Use ax.annotate for clean arrow drawing
-                ax.annotate('',
-                           xy=(x_end, y_end),           # Arrow head
-                           xytext=(x_start, y_start),   # Arrow tail
-                           arrowprops=dict(
-                               arrowstyle='->',
-                               color='gray',
-                               lw=1.5,
-                               alpha=0.4,
-                               shrinkA=5,  # Prevent overlap with start marker
-                               shrinkB=5   # Prevent overlap with end marker
-                           ))
+    elif plot_type == 'full':
+        # Index-based arrow drawing for individual queries
+        for img_id in plot_df['image_id'].unique():
+            img_df = plot_df[plot_df['image_id'] == img_id]
+
+            # Group contexts by task number
+            tasks = {}  # {task_num: {context: DataFrame}}
+            for context in img_df['context'].unique():
+                match = re.match(r'T(\d+)-(.+)', context)
+                if match:
+                    task_num = int(match.group(1))
+                    if task_num not in tasks:
+                        tasks[task_num] = {}
+                    tasks[task_num][context] = img_df[img_df['context'] == context]
+
+            # Draw arrows from T{N}-cur to all T{N+1} contexts
+            for task_num in sorted(tasks.keys()):
+                next_task = task_num + 1
+                if next_task not in tasks:
+                    continue
+
+                cur_context = f'T{task_num}-cur'
+                if cur_context not in tasks[task_num]:
+                    continue
+
+                cur_df = tasks[task_num][cur_context]
+
+                # For each query index (0-299)
+                for query_idx in cur_df['query_idx'].unique():
+                    cur_query = cur_df[cur_df['query_idx'] == query_idx]
+                    if len(cur_query) == 0:
+                        continue
+
+                    x_start = cur_query.iloc[0]['UMAP_1']
+                    y_start = cur_query.iloc[0]['UMAP_2']
+
+                    # Draw arrows to all T{N+1} contexts with same query_idx
+                    for next_context, next_df in tasks[next_task].items():
+                        next_query = next_df[next_df['query_idx'] == query_idx]
+                        if len(next_query) == 0:
+                            continue
+
+                        x_end = next_query.iloc[0]['UMAP_1']
+                        y_end = next_query.iloc[0]['UMAP_2']
+
+                        # Draw arrow with subtle styling (many arrows!)
+                        ax.annotate('',
+                                   xy=(x_end, y_end),
+                                   xytext=(x_start, y_start),
+                                   arrowprops=dict(
+                                       arrowstyle='->',
+                                       color='gray',
+                                       lw=0.3,      # Thin lines
+                                       alpha=0.15,  # Very transparent
+                                       shrinkA=2,
+                                       shrinkB=2
+                                   ))
 
 
 def visualize_queries(exp_dir: str, output_dir: str, num_images: int, plot_type: str, draw_arrows: bool = False):
@@ -189,9 +240,13 @@ def visualize_queries(exp_dir: str, output_dir: str, num_images: int, plot_type:
                 queries_to_reduce.append(centroid.numpy())
                 metadata.append({'image_id': str(img_id), 'context': context})
             elif plot_type == 'full':
-                for query_vec in record.object_queries:
+                for query_idx, query_vec in enumerate(record.object_queries):
                     queries_to_reduce.append(query_vec.numpy())
-                    metadata.append({'image_id': str(img_id), 'context': context})
+                    metadata.append({
+                        'image_id': str(img_id),
+                        'context': context,
+                        'query_idx': query_idx  # Track which query (0-299)
+                    })
 
     if not queries_to_reduce:
         print("Error: No queries were prepared for visualization.")

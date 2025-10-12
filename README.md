@@ -264,6 +264,9 @@ python -m analysis.visualize_query_geometry --exp_dir /home/kren04/shield/MD_DET
 
 python -m analysis.visualize_query_geometry --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries --plot_type full --num_images 3  --output_dir outputs/analysis/dynamic_queries
 
+python -m analysis.visualize_query_geometry --exp_dir /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/constancy_frozen_separated_qn2 --plot_type full --num_images 3  --output_dir outputs/analysis/dynamic_queries_frozen_separated_qn2
+
+python -m analysis.visualize_query_geometry --exp_dir /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/constancy_frozen_separated_qn --plot_type full --num_images 3  --output_dir outputs/analysis/dynamic_queries_frozen_separated_qn
 ```
 
 ```python
