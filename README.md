@@ -258,8 +258,168 @@ python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_
 ### frozen queries:
 /home/kren04/shield/MD_DETR_runs/constancy_frozen_separated_qn2
 /home/kren04/shield/MD_DETR_runs/validate_frozen_separated_qn_v_w_prompt
+```
 
-## visualize queries
+## Query Analysis Tools
+
+### 1. Query Geometry Visualization (UMAP)
+
+Visualize query geometry in 2D UMAP space to understand how queries cluster and drift across tasks.
+
+**Basic Usage:**
+```bash
+# Centroid plot: Mean of 300 queries per context
+python -m analysis.visualize_query_geometry \
+  --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries \
+  --plot_type centroid \
+  --num_images 8 \
+  --output_dir outputs/analysis/query_geometry
+
+# Full plot: All 300 queries visualized individually
+python -m analysis.visualize_query_geometry \
+  --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries \
+  --plot_type full \
+  --num_images 3 \
+  --output_dir outputs/analysis/query_geometry
+```
+
+**With Arrow Visualization (shows query drift across tasks):**
+```bash
+# Centroid plot with arrows
+python -m analysis.visualize_query_geometry \
+  --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries \
+  --plot_type centroid \
+  --num_images 5 \
+  --draw_arrows \
+  --output_dir outputs/analysis/query_geometry
+
+# Full plot with arrows (shows individual query trajectories)
+python -m analysis.visualize_query_geometry \
+  --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries \
+  --plot_type full \
+  --num_images 2 \
+  --draw_arrows \
+  --output_dir outputs/analysis/query_geometry
+```
+
+**Parameters:**
+- `--exp_dir`: Path to experiment directory containing `query_data_*.pkl` files
+- `--plot_type`: `centroid` (mean of queries) or `full` (all 300 queries)
+- `--num_images`: Number of images to sample for visualization
+- `--draw_arrows`: (Optional) Draw arrows showing query drift from T{N}-cur to T{N+1} contexts
+- `--output_dir`: Output directory for plots (default: `outputs/analysis/query_geometry`)
+
+**Arrow Features:**
+- **Color-coded by image**: Each image's arrows match its scatter point color
+- **Linestyle by target context**:
+  - Solid line (`-`): T{N}-cur → T{N+1}-cur (same validation type)
+  - Dashed line (`--`): T{N}-cur → T{N+1}-prev (previous tasks)
+  - Dotted line (`:`): T{N}-cur → T{N+1}-all (all tasks)
+- **Centroid mode**: One arrow per context pair
+- **Full mode**: Individual arrows for each query index (300 per image)
+
+**Output:**
+- `{plot_type}_query_visualization_{N}_images.png` (without arrows)
+- `{plot_type}_query_visualization_{N}_images_with_arrows.png` (with arrows)
+
+---
+
+### 2. Query Drift Analysis by Index
+
+Analyze whether query drift correlates with query index (0-299) by measuring Euclidean distance in original 256D space.
+
+**Mode A: Aggregate Analysis (mean across multiple images)**
+```bash
+# Analyze T1→T2 transition with 50 random images
+python -m analysis.analyze_query_drift_by_index \
+  --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries \
+  --source_task 1 \
+  --target_task 2 \
+  --aggregate \
+  --num_images 50 \
+  --output_dir outputs/analysis/query_drift
+
+# Use all available images (omit --num_images)
+python -m analysis.analyze_query_drift_by_index \
+  --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries \
+  --source_task 1 \
+  --target_task 2 \
+  --aggregate \
+  --output_dir outputs/analysis/query_drift
+```
+
+**Mode B: Per-Image Analysis (compare specific images)**
+```bash
+# Analyze specific images (show individual drift patterns)
+python -m analysis.analyze_query_drift_by_index \
+  --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries \
+  --source_task 1 \
+  --target_task 2 \
+  --image_ids 161799 15660 530624 \
+  --output_dir outputs/analysis/query_drift
+
+# Compare many images (up to 10 shown in legend)
+python -m analysis.analyze_query_drift_by_index \
+  --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries \
+  --source_task 1 \
+  --target_task 2 \
+  --image_ids 161799 15660 530624 463618 201934 \
+  --output_dir outputs/analysis/query_drift
+```
+
+**Per-Task Transition Analysis:**
+```bash
+# T1→T2 transition
+python -m analysis.analyze_query_drift_by_index \
+  --exp_dir /path/to/exp \
+  --source_task 1 --target_task 2 \
+  --aggregate --num_images 100
+
+# T2→T3 transition
+python -m analysis.analyze_query_drift_by_index \
+  --exp_dir /path/to/exp \
+  --source_task 2 --target_task 3 \
+  --aggregate --num_images 100
+
+# T3→T4 transition
+python -m analysis.analyze_query_drift_by_index \
+  --exp_dir /path/to/exp \
+  --source_task 3 --target_task 4 \
+  --aggregate --num_images 100
+```
+
+**Parameters:**
+- `--exp_dir`: Path to experiment directory containing `query_data_*.pkl` files
+- `--source_task`: Source task number (e.g., 1 for T1)
+- `--target_task`: Target task number (e.g., 2 for T2)
+- **Mode selection (required, mutually exclusive):**
+  - `--aggregate`: Aggregate mode (compute mean ± std across images)
+  - `--image_ids`: Per-image mode (space-separated list of image IDs)
+- `--num_images`: (Aggregate mode only) Number of images to sample (default: all)
+- `--output_dir`: Output directory (default: `outputs/analysis/query_drift`)
+
+**Output:**
+
+*Aggregate mode:*
+- `drift_T{src}_to_T{tgt}_aggregate_{N}images.png` - Line plot with mean ± std
+- `drift_T{src}_to_T{tgt}_{cur/prev/all}_aggregate_{N}images.csv` - Raw data (3 CSV files)
+
+*Per-image mode:*
+- `drift_T{src}_to_T{tgt}_images_{id1}_{id2}_{id3}.png` - 3-subplot comparison
+- `drift_T{src}_to_T{tgt}_{cur/prev/all}_images_{id1}_{id2}_{id3}.csv` - Raw data (3 CSV files)
+
+**Plot Interpretation:**
+- **X-axis**: Query index (0-299)
+- **Y-axis**: Euclidean distance in 256D space
+- **Blue solid line**: T{N}-cur → T{N+1}-cur
+- **Orange dashed line**: T{N}-cur → T{N+1}-prev
+- **Green dotted line**: T{N}-cur → T{N+1}-all
+- **Shaded area** (aggregate): ± 1 standard deviation
+
+---
+
+### Legacy Examples
+```bash
 python -m analysis.visualize_query_geometry --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries --plot_type centroid --num_images 8  --output_dir outputs/analysis/dynamic_queries
 
 python -m analysis.visualize_query_geometry --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries --plot_type full --num_images 3  --output_dir outputs/analysis/dynamic_queries
