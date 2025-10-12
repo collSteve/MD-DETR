@@ -10,6 +10,7 @@ from tqdm import tqdm
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+import re
 
 # Add project root to Python path to allow importing from models.probes
 project_root = Path(__file__).resolve().parent.parent
@@ -25,7 +26,81 @@ except ImportError:
     sys.exit(1)
 
 
-def visualize_queries(exp_dir: str, output_dir: str, num_images: int, plot_type: str):
+def draw_task_progression_arrows(ax, plot_df, plot_type):
+    """
+    Draw arrows from T{N}-cur contexts to T{N+1} contexts for each image.
+    This visualizes how queries change (or stay constant) across task progressions.
+
+    For 'full' plots with 300 queries per context, computes centroids to avoid
+    visual clutter from thousands of arrows.
+
+    Args:
+        ax: matplotlib axis object
+        plot_df: pandas DataFrame with columns ['UMAP_1', 'UMAP_2', 'image_id', 'context']
+        plot_type: 'centroid' or 'full'
+    """
+    # Compute centroids for each (image_id, context) combination
+    # This ensures we draw one arrow per context pair, not 300 arrows
+    centroids = plot_df.groupby(['image_id', 'context']).agg({
+        'UMAP_1': 'mean',
+        'UMAP_2': 'mean'
+    }).reset_index()
+
+    # Process each image separately
+    for img_id in centroids['image_id'].unique():
+        img_centroids = centroids[centroids['image_id'] == img_id]
+
+        # Group contexts by task number for this image
+        tasks = {}
+        for _, row in img_centroids.iterrows():
+            # Parse "T2-cur" → task_num=2, tag="cur"
+            match = re.match(r'T(\d+)-(.+)', row['context'])
+            if match:
+                task_num = int(match.group(1))
+                if task_num not in tasks:
+                    tasks[task_num] = []
+                tasks[task_num].append(row)
+
+        # Draw arrows from T{N}-cur to all T{N+1} contexts
+        for task_num in sorted(tasks.keys()):
+            next_task = task_num + 1
+
+            # Check if next task exists for this image
+            if next_task not in tasks:
+                continue
+
+            # Find the T{N}-cur point (source of arrows)
+            cur_context = f'T{task_num}-cur'
+            cur_points = [r for r in tasks[task_num] if r['context'] == cur_context]
+
+            # Skip if this image doesn't have T{N}-cur context
+            if not cur_points:
+                continue
+
+            cur_point = cur_points[0]
+            x_start = cur_point['UMAP_1']
+            y_start = cur_point['UMAP_2']
+
+            # Draw arrows to all T{N+1} contexts
+            for next_point in tasks[next_task]:
+                x_end = next_point['UMAP_1']
+                y_end = next_point['UMAP_2']
+
+                # Use ax.annotate for clean arrow drawing
+                ax.annotate('',
+                           xy=(x_end, y_end),           # Arrow head
+                           xytext=(x_start, y_start),   # Arrow tail
+                           arrowprops=dict(
+                               arrowstyle='->',
+                               color='gray',
+                               lw=1.5,
+                               alpha=0.4,
+                               shrinkA=5,  # Prevent overlap with start marker
+                               shrinkB=5   # Prevent overlap with end marker
+                           ))
+
+
+def visualize_queries(exp_dir: str, output_dir: str, num_images: int, plot_type: str, draw_arrows: bool = False):
     """
     Loads query data, performs UMAP dimensionality reduction, and creates a visualization
     to compare query geometry across different images and task contexts.
@@ -148,7 +223,12 @@ def visualize_queries(exp_dir: str, output_dir: str, num_images: int, plot_type:
         s=50 if plot_type == 'centroid' else 15,
         alpha=0.85 if plot_type == 'centroid' else 0.5
     )
-    
+
+    # Draw task progression arrows if requested
+    if draw_arrows:
+        print("Drawing task progression arrows...")
+        draw_task_progression_arrows(ax, plot_df, plot_type)
+
     ax.set_title(f"UMAP Visualization of Object Queries ({plot_type.capitalize()} Plot)", fontsize=18)
     ax.set_xlabel("UMAP Dimension 1", fontsize=12)
     ax.set_ylabel("UMAP Dimension 2", fontsize=12)
@@ -161,8 +241,9 @@ def visualize_queries(exp_dir: str, output_dir: str, num_images: int, plot_type:
 
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
-    
-    output_filename = f"{plot_type}_query_visualization_{num_images}_images.png"
+
+    arrow_suffix = "_with_arrows" if draw_arrows else ""
+    output_filename = f"{plot_type}_query_visualization_{num_images}_images{arrow_suffix}.png"
     save_path = os.path.join(output_dir, output_filename)
     
     plt.savefig(save_path, dpi=300)
@@ -197,6 +278,12 @@ if __name__ == "__main__":
         choices=['centroid', 'full'],
         help="Type of plot to generate: 'centroid' for the mean of queries, or 'full' for all 300 queries per image."
     )
-    
+    parser.add_argument(
+        '--draw_arrows',
+        action='store_true',
+        default=False,
+        help="Draw arrows from T{N}-cur to T{N+1} contexts to visualize query drift across tasks."
+    )
+
     args = parser.parse_args()
-    visualize_queries(args.exp_dir, args.output_dir, args.num_images, args.plot_type)
+    visualize_queries(args.exp_dir, args.output_dir, args.num_images, args.plot_type, args.draw_arrows)
