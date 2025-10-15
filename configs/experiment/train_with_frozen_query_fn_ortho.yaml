@@ -1,0 +1,9 @@
+defaults:
+  - train_with_frozen_query_fn
+
+exp_name:            train_with_frozen_query_fn_ortho_inter_001
+
+# Frozen query function with inter-task orthogonality
+# Guarantees query stability + prevents memory interference
+lambda_ortho_inter:  0.01
+lambda_ortho_intra:  0.0

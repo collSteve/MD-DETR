@@ -63,6 +63,9 @@ def main(cfg: DictConfig):
     if cfg.experiment.record_queries:
         common.append("--record_queries")
 
+    if cfg.experiment.use_query_loss:
+        common.append("--use_query_loss")
+
     # --- Correspondence embedding flags to the CLI call if they are true ---
     if cfg.experiment.get("use_correspondence_embedding", False):
         common.append("--use_correspondence_embedding")
@@ -85,6 +88,8 @@ def main(cfg: DictConfig):
             "--bg_thres",       str(cfg.experiment.bg_thres),
             "--bg_thres_topk",  str(cfg.experiment.bg_thres_topk),
             "--lambda_query",   str(cfg.experiment.lambda_query),
+            "--lambda_ortho_inter", str(cfg.experiment.lambda_ortho_inter),
+            "--lambda_ortho_intra", str(cfg.experiment.lambda_ortho_intra),
             "--resume",         str(cfg.experiment.resume),
         ]
     else:

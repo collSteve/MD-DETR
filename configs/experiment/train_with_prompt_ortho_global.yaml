@@ -1,0 +1,9 @@
+defaults:
+  - train_with_prompt
+
+exp_name:            train_with_prompt_ortho_global
+
+# Approach 1: Global orthogonality (all memory units orthogonal)
+# Equivalent when lambda_inter = 2 × lambda_intra
+lambda_ortho_inter:  0.02
+lambda_ortho_intra:  0.01

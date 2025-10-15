@@ -18,6 +18,8 @@ lr_old:              1e-5
 bg_thres:            0.65
 bg_thres_topk:       5
 lambda_query:        0.1
+lambda_ortho_inter:  0.0
+lambda_ortho_intra:  0.0
 
 repo_name:           SenseTime/deformable-detr
 freeze:              backbone,encoder,decoder,

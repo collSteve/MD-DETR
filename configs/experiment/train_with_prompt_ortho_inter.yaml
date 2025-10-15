@@ -1,0 +1,9 @@
+defaults:
+  - train_with_prompt
+
+exp_name:            train_with_prompt_ortho_inter_001
+
+# Approach 2: Inter-task orthogonality only
+# Forces memory K vectors from different tasks to be orthogonal
+lambda_ortho_inter:  0.01
+lambda_ortho_intra:  0.0

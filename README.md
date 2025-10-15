@@ -255,6 +255,10 @@ python run_test.py run.local=true experiment=train_with_prompt experiment.checkp
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_pqm_u_10_epoch_6_no_query_loss experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_query_loss=False
 
 
+python run.py run.local=true experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment=train_with_prompt_ortho_inter experiment.exp_name=train_pqm_simple_qk_ortho_regularization_inter_0.02_intra_0.01_u_10_epoch_6_no_query_loss_run experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.local_query=1 experiment.use_query_loss=false experiment.lambda_ortho_inter=0.02 experiment.lambda_ortho_intra=0.01
+
+python run_test.py run.local=true experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment=train_with_prompt_ortho_inter experiment.exp_name=train_pqm_simple_qk_ortho_regularization_inter_0.02_intra_0.01_u_10_epoch_6_no_query_loss_run_run_test experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.local_query=1 experiment.use_query_loss=false experiment.lambda_ortho_inter=0.02 experiment.lambda_ortho_intra=0.01
+
 ### frozen queries:
 /home/kren04/shield/MD_DETR_runs/constancy_frozen_separated_qn2
 /home/kren04/shield/MD_DETR_runs/validate_frozen_separated_qn_v_w_prompt
@@ -467,6 +471,232 @@ This uses the hybrid mechanism for the first 3 layers and switches to only <Q-to
 ```
 python run.py run.local=true experiment=train_with_prompt experiment.exp_name=train_dual_mem_phased_hybrid_specific experiment.use_dual_memory_model=True experiment.dual_memory_strategy=phased_hybrid_specific experiment.dual_memory_switch_layer=3 ...
 ```
+
+---
+
+## Orthogonality Regularization
+
+**NEW: Memory Interference Solution**
+
+To address the **two-way memory interference problem** in continual learning (where old frozen memories interfere with new task learning, and new memories interfere with old task recall), we've implemented **orthogonality regularization** that forces memory key vectors from different tasks to occupy orthogonal subspaces.
+
+### The Two-Way Problem
+
+**Direction 1 (Old → New)**: Frozen old memories accidentally match new queries → mAP@C drops (58% → 31%)
+**Direction 2 (New → Old)**: New memories accidentally match old queries → mAP@P catastrophic forgetting (drops to 16%)
+
+**Root Cause**: All memory K vectors exist in shared 256D space with no task boundaries.
+
+### Solution: Three Approaches
+
+**Approach 1 (Global Orthogonality)**: All memory units orthogonal to each other
+**Approach 2 (Inter-task Only)**: Memory units from different tasks orthogonal
+**Approach 3 (Inter + Intra)**: Both cross-task and within-task orthogonality
+
+Mathematical relationship: Approach 3 subsumes both (set `λ_inter = 2×λ_intra` for Approach 1, set `λ_intra=0` for Approach 2)
+
+### Usage
+
+Orthogonality regularization is controlled by two parameters:
+- `lambda_ortho_inter`: Weight for inter-task (cross-task) orthogonality
+- `lambda_ortho_intra`: Weight for intra-task (within-task) orthogonality
+
+**Predefined Experiment Configs:**
+
+We provide three ready-to-use configurations in `configs/experiment/`:
+1. **`train_with_prompt_ortho_inter.yaml`** - Inter-task only (Approach 2, recommended)
+2. **`train_with_prompt_ortho_global.yaml`** - Global orthogonality (Approach 1)
+3. **`train_with_frozen_query_fn_ortho.yaml`** - Frozen query + inter-task orthogonality
+
+#### Example 1: Inter-task Only (Approach 2 - Recommended)
+
+Use the predefined config:
+```bash
+python run.py run.local=true \
+    experiment=train_with_prompt_ortho_inter \
+    shared=shield
+```
+
+Or override from base config:
+```bash
+python run.py run.local=true \
+    experiment=train_with_prompt \
+    experiment.lambda_ortho_inter=0.01 \
+    experiment.lambda_ortho_intra=0.0 \
+    experiment.exp_name=my_ortho_experiment \
+    shared=shield
+```
+
+#### Example 2: Global Orthogonality (Approach 1)
+
+```bash
+python run.py run.local=true \
+    experiment=train_with_prompt_ortho_global \
+    shared=shield
+```
+
+#### Example 3: Frozen Query Function + Orthogonality
+
+Guarantees query stability (queries never drift) while preventing memory interference:
+
+```bash
+python run_test.py run.local=true \
+    experiment=train_with_frozen_query_fn_ortho \
+    shared=shield
+```
+
+**Note**: `run_test.py` uses `main_test.py` with a separate frozen query function model that never updates, eliminating query drift entirely.
+
+#### Example 4: Custom Lambda Values
+
+Test different hyperparameter values:
+```bash
+# Higher inter-task regularization
+python run.py run.local=true \
+    experiment=train_with_prompt \
+    experiment.lambda_ortho_inter=0.05 \
+    experiment.lambda_ortho_intra=0.01 \
+    experiment.exp_name=ortho_custom_high \
+    shared=shield
+
+# Grid search across lambda values
+for lambda in 0.001 0.01 0.05 0.1; do
+    python run.py run.local=true \
+        experiment=train_with_prompt_ortho_inter \
+        experiment.lambda_ortho_inter=$lambda \
+        experiment.exp_name=ortho_inter_${lambda} \
+        shared=shield
+done
+```
+
+#### Example 5: Advanced - Custom Query Settings
+
+Control query representation and query loss independently:
+```bash
+# Use per-proposal queries WITHOUT query loss
+python run.py run.local=true \
+    experiment=train_with_prompt_ortho_inter \
+    experiment.local_query=1 \
+    experiment.use_query_loss=false \
+    shared=shield
+
+# Use averaged query (simpler, no per-proposal memory)
+python run.py run.local=true \
+    experiment=train_with_prompt_ortho_inter \
+    experiment.local_query=0 \
+    shared=shield
+```
+
+**Key Parameters:**
+- `local_query=1`: Per-proposal queries (300 queries/image) - more expressive
+- `local_query=0`: Image-level query (averaged) - simpler
+- `use_query_loss=true`: Apply query loss regularization (default)
+- `use_query_loss=false`: Disable query loss (useful for isolating orthogonality effects)
+
+### Monitoring
+
+During training, the progress bar displays:
+- **`O_i`**: Inter-task orthogonality loss value
+- **`O_a`**: Intra-task orthogonality loss value
+
+These values should **decrease** during training as K vectors become more orthogonal.
+
+Example progress bar:
+```
+Epoch 2: 100%|████| 500/500 [10:23<00:00, tr=2.34, ce=0.89, giou=0.45, O_i=15.32, O_a=8.76]
+```
+
+### Mathematical Foundation
+
+**Inter-task Loss** (per layer):
+```
+loss_inter = ||K_current_norm @ K_old_norm^T||²_F
+```
+Forces K vectors from different tasks to be orthogonal (zero dot product).
+
+**Intra-task Loss** (per layer):
+```
+loss_intra = ||K_current_norm @ K_current_norm^T - I||²_F
+```
+Forces K vectors within current task to be orthogonal.
+
+**Total Training Loss**:
+```
+loss = detection_loss + λ_inter × loss_inter + λ_intra × loss_intra
+```
+
+### Expected Outcomes
+
+✅ **Reduced mAP@C degradation**: New tasks learn without old memory interference
+✅ **Reduced mAP@P catastrophic forgetting**: New memories don't interfere with old task recall
+✅ **Improved mAP@A**: Better overall performance across all seen tasks
+✅ **Observable orthogonality**: K vectors from different tasks geometrically separated
+
+### Hyperparameter Tuning
+
+**Recommended starting values:**
+- Start with `λ_inter = 0.01`, `λ_intra = 0.0` (Approach 2) - Use `train_with_prompt_ortho_inter` config
+- If still seeing interference, increase to `λ_inter = 0.05` or `0.1`
+- Try `λ_inter = 0.02`, `λ_intra = 0.01` for global orthogonality (Approach 1) - Use `train_with_prompt_ortho_global` config
+- Monitor O_i and O_a values in progress bar - they should decrease and stabilize
+
+**Grid search example:**
+```bash
+# Test different lambda_inter values with Hydra
+for lambda in 0.001 0.01 0.05 0.1; do
+    python run.py run.local=true \
+        experiment=train_with_prompt_ortho_inter \
+        experiment.lambda_ortho_inter=$lambda \
+        experiment.exp_name=ortho_grid_${lambda} \
+        shared=shield
+done
+
+# With frozen queries (test variant)
+for lambda in 0.001 0.01 0.05 0.1; do
+    python run_test.py run.local=true \
+        experiment=train_with_frozen_query_fn_ortho \
+        experiment.lambda_ortho_inter=$lambda \
+        experiment.exp_name=frozen_ortho_${lambda} \
+        shared=shield
+done
+```
+
+**Slurm batch submission:**
+```bash
+# Submit to cluster with Slurm launcher
+python run.py \
+    experiment=train_with_prompt_ortho_inter \
+    sbatch=train_sbatch \
+    hydra/launcher=slurm \
+    hydra.verbose=true
+```
+
+### Implementation Details
+
+- **Guard Condition**: Only applied when `train=True`, `use_prompts=True`, and `task_id > 1`
+- **Per-Layer Aggregation**: Sums orthogonality losses across all decoder layers (0-5)
+- **Automatic Gradient Flow**: No manual hooks needed - PyTorch autograd handles it
+- **DDP Compatible**: Works seamlessly with distributed training
+- **No Performance Overhead**: Minimal computational cost (one matrix multiplication per layer)
+
+### Troubleshooting
+
+**Issue**: O_i/O_a values not decreasing
+- **Solution**: Increase lambda values, check that `use_prompts=1` and `task_id > 1`
+
+**Issue**: Training diverges or mAP drops significantly
+- **Solution**: Lambda values too high - reduce by 10x and retry
+
+**Issue**: No O_i/O_a in progress bar
+- **Solution**: Check that you're on Task 2+ (orthogonality only applies from Task 2 onwards)
+
+### Related Documentation
+
+- **Full Analysis**: See `MEMORY_INTERFERENCE_SOLUTIONS.md` for complete derivation and experimental protocol
+- **Implementation**: Core logic in `utils.py:compute_memory_orthogonality_loss()`
+- **Integration**: `engine.py` and `engine_test2.py` common_step() methods
+
+---
 
 ## New Weight Analysis:
 Here are some examples of how you can run it:

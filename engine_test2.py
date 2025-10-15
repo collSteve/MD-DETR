@@ -229,9 +229,10 @@ class local_trainer(pl.LightningModule):
 						for j in ind[0]:
 							one_hot_proposals[i][j] = 1
 
-					query_wt = self.model.model.prompts.query_tf(query.view(query.shape[0],-1))
-					query_loss = F.cross_entropy(query_wt, one_hot_proposals)
-					
+					if self.args.use_query_loss:
+						query_wt = self.model.model.prompts.query_tf(query.view(query.shape[0],-1))
+						query_loss = F.cross_entropy(query_wt, one_hot_proposals)
+
 				if self.args.bg_thres and not return_outputs:
 					results = self.processor.post_process(outputs, target_sizes=orig_target_sizes, bg_thres_topk=self.args.bg_thres_topk)
 		else:
@@ -268,11 +269,22 @@ class local_trainer(pl.LightningModule):
 		loss = outputs.loss
 		loss_dict = outputs.loss_dict
 
-		if self.args.local_query and self.args.use_prompts:
+		if self.args.local_query and self.args.use_prompts and self.args.use_query_loss:
 		# if self.args.local_query:
 			loss_dict['query_loss'] = query_loss
 
 			loss += self.args.lambda_query * query_loss
+
+		# Orthogonality regularization (only for task_id > 1)
+		if train and self.args.use_prompts and self.task_id > 1:
+			ortho_inter, ortho_intra = utils.compute_memory_orthogonality_loss(
+				self.model.model.prompts,
+				self.task_id,
+				self.device
+			)
+			loss_dict['ortho_inter'] = ortho_inter
+			loss_dict['ortho_intra'] = ortho_intra
+			loss += self.args.lambda_ortho_inter * ortho_inter + self.args.lambda_ortho_intra * ortho_intra
 
 		if return_outputs:
 
@@ -292,7 +304,7 @@ class local_trainer(pl.LightningModule):
 	def training_step(self, batch, batch_idx): # automatic training schedule
 		loss, loss_dict = self.common_step(batch, batch_idx, train=True)
 		# logs metrics for each training_step
-		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL'}
+		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL', 'ortho_inter':'O_i', 'ortho_intra':'O_a'}
 		self.log("tr", loss, prog_bar=True)
 		for k,v in loss_dict.items():
 			self.log(short_map[k], v.item(), prog_bar=True)

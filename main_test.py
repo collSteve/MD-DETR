@@ -158,9 +158,13 @@ def get_args_parser():
     # Continual learning setup
     parser.add_argument('--n_tasks', default=4, type=int, 
                         help='Number of tasks for continual learning setup')
-    parser.add_argument('--lambda_query', default=0, type=float, 
+    parser.add_argument('--lambda_query', default=0, type=float,
                         help='Lambda parameter for query-based continual learning')
-    parser.add_argument('--local_query', default=0, type=int, 
+    parser.add_argument('--lambda_ortho_inter', default=0.0, type=float,
+                        help='Lambda for inter-task orthogonality regularization')
+    parser.add_argument('--lambda_ortho_intra', default=0.0, type=float,
+                        help='Lambda for intra-task orthogonality regularization')
+    parser.add_argument('--local_query', default=0, type=int,
                         help='Flag to enable localalized query')
     parser.add_argument('--start_task', default=1, type=int, 
                         help='Task to start training from in continual learning')
@@ -204,8 +208,12 @@ def get_args_parser():
                         help='Bounding box threshold for positive detections')
     parser.add_argument('--bg_thres', default=0.7, type=float, 
                         help='Threshold for considering a detection as background')
-    parser.add_argument('--bg_thres_topk', default=5, type=int, 
+    parser.add_argument('--bg_thres_topk', default=5, type=int,
                         help='Top-K background detections to consider')
+
+    # query loss
+    parser.add_argument('--use_query_loss', action='store_true',
+                        help="Enable query loss for training")
 
     # Pretrained model loading
     parser.add_argument('--big_pretrained', default="", type=str, 

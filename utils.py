@@ -316,3 +316,64 @@ class MetricLogger(object):
 		total_time_str = str(datetime.timedelta(seconds=int(total_time)))
 		print('{} Total time: {} ({:.4f} s / it)'.format(
 			header, total_time_str, total_time / len(iterable)))
+
+
+def compute_memory_orthogonality_loss(prompts, task_id, device):
+	"""
+	Compute orthogonality regularization loss for memory keys.
+
+	Implements Approach 3: Inter-task + Intra-task orthogonality.
+	- Inter-task: Forces K vectors from different tasks to be orthogonal
+	- Intra-task: Forces K vectors within current task to be orthogonal
+
+	Args:
+		prompts: Memory module (DynamicPrompt or subclass like SimpleProposalMemory)
+		task_id: Current task ID (int)
+		device: torch.device for creating identity matrices
+
+	Returns:
+		tuple: (loss_inter, loss_intra)
+			- loss_inter: Inter-task orthogonality loss (scalar tensor)
+			- loss_intra: Intra-task orthogonality loss (scalar tensor)
+	"""
+	import torch.nn.functional as F
+
+	loss_ortho_inter = torch.tensor(0.0, device=device)
+	loss_ortho_intra = torch.tensor(0.0, device=device)
+
+	# Check if prompts has layer_memories attribute
+	if not hasattr(prompts, 'layer_memories'):
+		return loss_ortho_inter, loss_ortho_intra
+
+	for layer_name, task_dict in prompts.layer_memories.items():
+		K_current_list = []
+		K_old_list = []
+
+		for tid, mem in task_dict.items():
+			_, K, _ = mem.forward()  # (U_task, 256)
+
+			if tid == str(task_id):
+				K_current_list.append(K)
+			else:
+				# CRITICAL: Detach old memories to prevent gradient flow to frozen tasks
+				K_old_list.append(K.detach())
+
+		if K_current_list and K_old_list:
+			K_current = torch.cat(K_current_list, dim=0)  # (U_current, 256)
+			K_old = torch.cat(K_old_list, dim=0)  # (U_old, 256)
+
+			# Normalize
+			K_current_norm = F.normalize(K_current, dim=1)
+			K_old_norm = F.normalize(K_old, dim=1)
+
+			# Inter-task orthogonality
+			cross_gram = K_current_norm @ K_old_norm.T  # (U_current, U_old)
+			loss_ortho_inter = loss_ortho_inter + cross_gram.pow(2).sum()
+
+			# Intra-task orthogonality (only for current task)
+			n = len(K_current)
+			self_gram = K_current_norm @ K_current_norm.T  # (U_current, U_current)
+			identity = torch.eye(n, device=device)
+			loss_ortho_intra = loss_ortho_intra + (self_gram - identity).pow(2).sum()
+
+	return loss_ortho_inter, loss_ortho_intra

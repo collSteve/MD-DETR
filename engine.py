@@ -298,6 +298,17 @@ class local_trainer(pl.LightningModule):
 
 			loss += self.args.lambda_query * query_loss
 
+		# Orthogonality regularization (only for task_id > 1)
+		if train and self.args.use_prompts and self.task_id > 1:
+			ortho_inter, ortho_intra = utils.compute_memory_orthogonality_loss(
+				self.model.model.prompts,
+				self.task_id,
+				self.device
+			)
+			loss_dict['ortho_inter'] = ortho_inter
+			loss_dict['ortho_intra'] = ortho_intra
+			loss += self.args.lambda_ortho_inter * ortho_inter + self.args.lambda_ortho_intra * ortho_intra
+
 		if return_outputs:
 
 			if self.args.mask_gradients:
@@ -316,7 +327,7 @@ class local_trainer(pl.LightningModule):
 	def training_step(self, batch, batch_idx): # automatic training schedule
 		loss, loss_dict = self.common_step(batch, batch_idx, train=True)
 		# logs metrics for each training_step
-		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL'}
+		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL', 'ortho_inter':'O_i', 'ortho_intra':'O_a'}
 		self.log("tr", loss, prog_bar=True)
 		for k,v in loss_dict.items():
 			self.log(short_map[k], v.item(), prog_bar=True)
