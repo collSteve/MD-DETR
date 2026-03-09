@@ -164,6 +164,8 @@ def get_args_parser():
                         help='Lambda for inter-task orthogonality regularization')
     parser.add_argument('--lambda_ortho_intra', default=0.0, type=float,
                         help='Lambda for intra-task orthogonality regularization')
+    parser.add_argument('--use_ortho_regularization', action='store_true',
+                        help='Enable orthogonality regularization for memory interference mitigation')
     parser.add_argument('--local_query', default=0, type=int,
                         help='Flag to enable localalized query')
     parser.add_argument('--start_task', default=1, type=int, 
@@ -243,6 +245,46 @@ def get_args_parser():
 
     return parser
 
+def validate_ortho_config(args):
+    """Validate orthogonality regularization flag and lambda consistency."""
+    flag_enabled = args.use_ortho_regularization
+    lambda_inter = args.lambda_ortho_inter
+    lambda_intra = args.lambda_ortho_intra
+    both_zero = (lambda_inter == 0.0 and lambda_intra == 0.0)
+    any_nonzero = (lambda_inter != 0.0 or lambda_intra != 0.0)
+
+    # Case 1: Flag disabled but lambdas are non-zero
+    if not flag_enabled and any_nonzero:
+        print("=" * 80)
+        print("WARNING: Orthogonality Regularization Configuration Issue")
+        print("=" * 80)
+        print(f"  use_ortho_regularization = False")
+        print(f"  lambda_ortho_inter = {lambda_inter}")
+        print(f"  lambda_ortho_intra = {lambda_intra}")
+        print()
+        print("  Lambda values will be IGNORED because regularization is disabled.")
+        print("  If you want to use regularization, set use_ortho_regularization=true")
+        print("=" * 80)
+        print()
+
+    # Case 2: Flag enabled but both lambdas are zero
+    if flag_enabled and both_zero:
+        print("=" * 80)
+        print("WARNING: Orthogonality Regularization Configuration Issue")
+        print("=" * 80)
+        print(f"  use_ortho_regularization = True")
+        print(f"  lambda_ortho_inter = {lambda_inter}")
+        print(f"  lambda_ortho_intra = {lambda_intra}")
+        print()
+        print("  Regularization losses will be computed but have NO effect (wasted compute).")
+        print()
+        print("  Recommended actions:")
+        print("    1) Set use_ortho_regularization=false (if testing baseline), OR")
+        print("    2) Set lambda_ortho_inter > 0.0 (for inter-task orthogonality), OR")
+        print("    3) Set lambda_ortho_intra > 0.0 (for intra-task orthogonality)")
+        print("=" * 80)
+        print()
+
 def main(args):
 
     # fix the seed for reproducibility
@@ -290,6 +332,9 @@ def main(args):
         # Default behavior
         args.task_map = canonical_task_map
         args.task_label2name = canonical_label2name
+
+    # Validate orthogonality regularization configuration
+    validate_ortho_config(args)
 
     args.task_label2name[args.n_classes-1] = "BG"
 

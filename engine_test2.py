@@ -275,8 +275,8 @@ class local_trainer(pl.LightningModule):
 
 			loss += self.args.lambda_query * query_loss
 
-		# Orthogonality regularization (only for task_id > 1)
-		if train and self.args.use_prompts and self.task_id > 1:
+		# Orthogonality regularization
+		if train and self.args.use_prompts and self.args.use_ortho_regularization:
 			ortho_inter, ortho_intra = utils.compute_memory_orthogonality_loss(
 				self.model.model.prompts,
 				self.task_id,

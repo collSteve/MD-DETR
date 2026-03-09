@@ -255,7 +255,7 @@ python run_test.py run.local=true experiment=train_with_prompt experiment.checkp
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_pqm_u_10_epoch_6_no_query_loss experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_query_loss=False
 
 
-python run.py run.local=true experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment=train_with_prompt_ortho_inter experiment.exp_name=train_pqm_simple_qk_ortho_regularization_inter_0.02_intra_0.01_u_10_epoch_6_no_query_loss_run experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.local_query=1 experiment.use_query_loss=false experiment.lambda_ortho_inter=0.02 experiment.lambda_ortho_intra=0.01
+python run.py run.local=true experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment=train_with_prompt_ortho_inter experiment.exp_name=train_pqm_simple_qk_ortho_regularization_inter_0.02_intra_0.01_u_10_epoch_6_no_query_loss_run_Fixed experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.local_query=1 experiment.use_query_loss=false experiment.lambda_ortho_inter=0.02 experiment.lambda_ortho_intra=0.01
 
 python run_test.py run.local=true experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment=train_with_prompt_ortho_inter experiment.exp_name=train_pqm_simple_qk_ortho_regularization_inter_0.02_intra_0.01_u_10_epoch_6_no_query_loss_run_run_test experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.local_query=1 experiment.use_query_loss=false experiment.lambda_ortho_inter=0.02 experiment.lambda_ortho_intra=0.01
 
@@ -497,9 +497,10 @@ Mathematical relationship: Approach 3 subsumes both (set `λ_inter = 2×λ_intra
 
 ### Usage
 
-Orthogonality regularization is controlled by two parameters:
-- `lambda_ortho_inter`: Weight for inter-task (cross-task) orthogonality
-- `lambda_ortho_intra`: Weight for intra-task (within-task) orthogonality
+Orthogonality regularization is controlled by three parameters:
+- `use_ortho_regularization`: Boolean flag to enable/disable the feature (default: `false`)
+- `lambda_ortho_inter`: Weight for inter-task (cross-task) orthogonality (only effective when flag=`true`)
+- `lambda_ortho_intra`: Weight for intra-task (within-task) orthogonality (only effective when flag=`true`)
 
 **Predefined Experiment Configs:**
 
@@ -507,6 +508,18 @@ We provide three ready-to-use configurations in `configs/experiment/`:
 1. **`train_with_prompt_ortho_inter.yaml`** - Inter-task only (Approach 2, recommended)
 2. **`train_with_prompt_ortho_global.yaml`** - Global orthogonality (Approach 1)
 3. **`train_with_frozen_query_fn_ortho.yaml`** - Frozen query + inter-task orthogonality
+
+#### Example 0: Baseline Without Regularization
+
+To run without any orthogonality regularization (baseline for comparison):
+```bash
+python run.py run.local=true \
+    experiment=train_with_prompt \
+    experiment.use_ortho_regularization=false \
+    shared=shield
+```
+
+**Note:** The flag defaults to `false`, so you can also simply use `experiment=train_with_prompt` without explicitly setting the flag.
 
 #### Example 1: Inter-task Only (Approach 2 - Recommended)
 
@@ -521,6 +534,7 @@ Or override from base config:
 ```bash
 python run.py run.local=true \
     experiment=train_with_prompt \
+    experiment.use_ortho_regularization=true \
     experiment.lambda_ortho_inter=0.01 \
     experiment.lambda_ortho_intra=0.0 \
     experiment.exp_name=my_ortho_experiment \
@@ -554,6 +568,7 @@ Test different hyperparameter values:
 # Higher inter-task regularization
 python run.py run.local=true \
     experiment=train_with_prompt \
+    experiment.use_ortho_regularization=true \
     experiment.lambda_ortho_inter=0.05 \
     experiment.lambda_ortho_intra=0.01 \
     experiment.exp_name=ortho_custom_high \
@@ -595,11 +610,19 @@ python run.py run.local=true \
 
 ### Monitoring
 
+**Configuration Validation:**
+At startup, the system validates your orthogonality regularization configuration and prints warnings if:
+- `use_ortho_regularization=false` but lambda values are non-zero (lambdas will be ignored)
+- `use_ortho_regularization=true` but both lambdas are 0.0 (wasted computation)
+
+**Training Progress:**
 During training, the progress bar displays:
 - **`O_i`**: Inter-task orthogonality loss value
 - **`O_a`**: Intra-task orthogonality loss value
 
 These values should **decrease** during training as K vectors become more orthogonal.
+
+**Note:** If `use_ortho_regularization=false`, these metrics will not appear in the progress bar (regularization is completely disabled).
 
 Example progress bar:
 ```
@@ -631,6 +654,10 @@ loss = detection_loss + λ_inter × loss_inter + λ_intra × loss_intra
 ✅ **Reduced mAP@P catastrophic forgetting**: New memories don't interfere with old task recall
 ✅ **Improved mAP@A**: Better overall performance across all seen tasks
 ✅ **Observable orthogonality**: K vectors from different tasks geometrically separated
+
+**Note on Task 1:**
+- Intra-task regularization (O_a) applies to Task 1, promoting diverse memory representations
+- Inter-task regularization (O_i) is 0.0 for Task 1 (no old tasks exist yet)
 
 ### Hyperparameter Tuning
 
@@ -673,7 +700,10 @@ python run.py \
 
 ### Implementation Details
 
-- **Guard Condition**: Only applied when `train=True`, `use_prompts=True`, and `task_id > 1`
+- **Guard Condition**: Applied when `train=True`, `use_prompts=True`, and `use_ortho_regularization=True`
+- **Task-Specific Behavior**:
+  - Task 1: Only intra-task loss computed (no old tasks to be orthogonal to)
+  - Task 2+: Both inter-task and intra-task losses computed
 - **Per-Layer Aggregation**: Sums orthogonality losses across all decoder layers (0-5)
 - **Automatic Gradient Flow**: No manual hooks needed - PyTorch autograd handles it
 - **DDP Compatible**: Works seamlessly with distributed training
@@ -682,13 +712,13 @@ python run.py \
 ### Troubleshooting
 
 **Issue**: O_i/O_a values not decreasing
-- **Solution**: Increase lambda values, check that `use_prompts=1` and `task_id > 1`
+- **Solution**: Increase lambda values, check that `use_prompts=1` and `use_ortho_regularization=true`
 
 **Issue**: Training diverges or mAP drops significantly
 - **Solution**: Lambda values too high - reduce by 10x and retry
 
 **Issue**: No O_i/O_a in progress bar
-- **Solution**: Check that you're on Task 2+ (orthogonality only applies from Task 2 onwards)
+- **Solution**: Check that `use_ortho_regularization=true`. Note: O_i (inter-task) will be 0.0 for Task 1 (expected behavior)
 
 ### Related Documentation
 

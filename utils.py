@@ -358,22 +358,24 @@ def compute_memory_orthogonality_loss(prompts, task_id, device):
 				# CRITICAL: Detach old memories to prevent gradient flow to frozen tasks
 				K_old_list.append(K.detach())
 
-		if K_current_list and K_old_list:
+		# Only need current task data to compute losses
+		if K_current_list:
 			K_current = torch.cat(K_current_list, dim=0)  # (U_current, 256)
-			K_old = torch.cat(K_old_list, dim=0)  # (U_old, 256)
-
-			# Normalize
 			K_current_norm = F.normalize(K_current, dim=1)
-			K_old_norm = F.normalize(K_old, dim=1)
 
-			# Inter-task orthogonality
-			cross_gram = K_current_norm @ K_old_norm.T  # (U_current, U_old)
-			loss_ortho_inter = loss_ortho_inter + cross_gram.pow(2).sum()
-
-			# Intra-task orthogonality (only for current task)
+			# Intra-task orthogonality: Always compute for current task
+			# Encourages diversity among memory units within the task
 			n = len(K_current)
 			self_gram = K_current_norm @ K_current_norm.T  # (U_current, U_current)
 			identity = torch.eye(n, device=device)
 			loss_ortho_intra = loss_ortho_intra + (self_gram - identity).pow(2).sum()
+
+			# Inter-task orthogonality: Only compute when old tasks exist
+			# Prevents interference between current and previous task memories
+			if K_old_list:
+				K_old = torch.cat(K_old_list, dim=0)  # (U_old, 256)
+				K_old_norm = F.normalize(K_old, dim=1)
+				cross_gram = K_current_norm @ K_old_norm.T  # (U_current, U_old)
+				loss_ortho_inter = loss_ortho_inter + cross_gram.pow(2).sum()
 
 	return loss_ortho_inter, loss_ortho_intra

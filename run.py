@@ -66,6 +66,9 @@ def main(cfg: DictConfig):
     if cfg.experiment.use_query_loss:
         common.append("--use_query_loss")
 
+    if cfg.experiment.get("use_ortho_regularization", False):
+        common.append("--use_ortho_regularization")
+
     # --- Correspondence embedding flags to the CLI call if they are true ---
     if cfg.experiment.get("use_correspondence_embedding", False):
         common.append("--use_correspondence_embedding")
