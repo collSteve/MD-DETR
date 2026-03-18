@@ -72,6 +72,11 @@ class local_trainer(pl.LightningModule):
 		detr_config.q_to_ek_strategy = args.q_to_ek_strategy
 		# --- End of change ---
 
+		# --- Selective memory (anti-interference) ---
+		detr_config.use_selective_memory = getattr(args, 'use_selective_memory', False)
+		detr_config.memory_focus = getattr(args, 'memory_focus', 10.0)
+		detr_config.num_null_units = getattr(args, 'num_null_units', 2)
+
 		self.invalid_cls_logits = list(range(seen_classes, args.n_classes-1)) #unknown class indx will not be included in the invalid class range
 
 		ModelClass = get_model_class(args.use_dual_memory_model)
@@ -309,25 +314,39 @@ class local_trainer(pl.LightningModule):
 			loss_dict['ortho_intra'] = ortho_intra
 			loss += self.args.lambda_ortho_inter * ortho_inter + self.args.lambda_ortho_intra * ortho_intra
 
+		# Background suppression loss (uses Pass 2 matching for correct fg/bg labels)
+		if train and self.args.use_prompts and getattr(self.args, 'use_bg_suppression', False) and self.args.local_query:
+			prompts_bg = self.model.model.prompts
+			if hasattr(prompts_bg, 'compute_bg_loss') and len(getattr(prompts_bg, '_stored_P_per_proposal', [])) > 0:
+				outputs_without_aux_p2 = {k: v for k, v in outputs.items() if k != "auxiliary_outputs" and k != "enc_outputs"}
+				indices_p2 = self.model.matcher(outputs_without_aux_p2, labels)
+				fg_mask_p2 = torch.zeros((len(labels), 300), device=self.device)
+				for i, ind in enumerate(indices_p2):
+					for j in ind[0]:
+						fg_mask_p2[i][j] = 1
+				bg_loss = prompts_bg.compute_bg_loss(fg_mask_p2)
+				loss_dict['bg_loss'] = bg_loss
+				loss += self.args.lambda_bg * bg_loss
+
 		if return_outputs:
 
 			if self.args.mask_gradients:
 				outputs.logits[:,:, self.invalid_cls_logits] = -10e10
 				outputs.logits = outputs.logits[:,:,:self.args.n_classes-1] #removing background class
-		
+
 			# TODO: fix  processor.post_process_object_detection()
 			results = self.processor.post_process(outputs, target_sizes=orig_target_sizes) # convert outputs to COCO api
 			res = {target['image_id'].item(): output for target, output in zip(labels, results)}
 			res = self.evaluator.prepare_for_coco_detection(res)
-		
+
 			return loss, loss_dict, res
 
 		return loss, loss_dict
-	
+
 	def training_step(self, batch, batch_idx): # automatic training schedule
 		loss, loss_dict = self.common_step(batch, batch_idx, train=True)
 		# logs metrics for each training_step
-		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL', 'ortho_inter':'O_i', 'ortho_intra':'O_a'}
+		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL', 'ortho_inter':'O_i', 'ortho_intra':'O_a', 'bg_loss':'bg'}
 		self.log("tr", loss, prog_bar=True)
 		for k,v in loss_dict.items():
 			self.log(short_map[k], v.item(), prog_bar=True)
@@ -466,8 +485,9 @@ class local_trainer(pl.LightningModule):
 		if prompts is not None:
 			for layer, task_dict in prompts.layer_memories.items():
 				for tid, mem in task_dict.items():
+					null_info = f" #null_k={len(mem.null_k_list)}" if hasattr(mem, 'null_k_list') else ""
 					self._mem_logger.info(
-						f"Layer {layer} | Task {tid} | #p={len(mem.p_list)} #k={len(mem.k_list)} #a={len(mem.a_list)}"
+						f"Layer {layer} | Task {tid} | #p={len(mem.p_list)} #k={len(mem.k_list)} #a={len(mem.a_list)}{null_info}"
 					)
 		# every parameter’s device
 		# self._mem_logger.info("=== Parameter device map ===")

@@ -69,6 +69,15 @@ def main(cfg: DictConfig):
     if cfg.experiment.get("use_ortho_regularization", False):
         common.append("--use_ortho_regularization")
 
+    if cfg.experiment.get("use_selective_memory", False):
+        common.append("--use_selective_memory")
+    common.extend([
+        "--memory_focus", str(cfg.experiment.get("memory_focus", 10.0)),
+        "--num_null_units", str(cfg.experiment.get("num_null_units", 2)),
+    ])
+    if cfg.experiment.get("use_bg_suppression", False):
+        common.append("--use_bg_suppression")
+
     # --- Correspondence embedding flags to the CLI call if they are true ---
     if cfg.experiment.get("use_correspondence_embedding", False):
         common.append("--use_correspondence_embedding")
@@ -93,6 +102,7 @@ def main(cfg: DictConfig):
             "--lambda_query",   str(cfg.experiment.lambda_query),
             "--lambda_ortho_inter", str(cfg.experiment.lambda_ortho_inter),
             "--lambda_ortho_intra", str(cfg.experiment.lambda_ortho_intra),
+            "--lambda_bg",          str(cfg.experiment.get("lambda_bg", 0.1)),
             "--resume",         str(cfg.experiment.resume),
         ]
     else:

@@ -1,0 +1,16 @@
+defaults:
+  - train_with_prompt
+
+exp_name: selective_memory
+use_selective_memory: true
+memory_focus: 10.0
+num_null_units: 2
+use_bg_suppression: true
+lambda_bg: 0.1
+
+# query_loss trains query_tf (nn.Linear 300*256 -> 300) to predict foreground proposals.
+# query_tf is only used in DynamicPrompt.forward() to collapse 300 proposals into one query.
+# Per-proposal memories (SimpleProposalMemory, SelectiveProposalMemory) bypass query_tf entirely
+# and use raw proposals for addressing. Enabling query_loss here wastes compute on a 23M param
+# module that is never called in the forward path.
+use_query_loss: false

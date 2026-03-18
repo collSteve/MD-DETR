@@ -1616,8 +1616,18 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             #                                 e_p_length=config.prompt_len, local_query=config.local_query)
             # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=10,
             #                                 e_p_length=2, local_query=config.local_query)
-            self.prompts = SimpleProposalMemory(emb_d = config.d_model, key_d = config.d_model, default_units=10,
-                                            e_p_length=2, local_query=config.local_query)
+            if getattr(config, 'use_selective_memory', False):
+                from models.memory.selective_proposal_memory import SelectiveProposalMemory
+                self.prompts = SelectiveProposalMemory(
+                    emb_d=config.d_model, key_d=config.d_model,
+                    default_units=10, e_p_length=2,
+                    local_query=config.local_query,
+                    focus=getattr(config, 'memory_focus', 10.0),
+                    num_null_units=getattr(config, 'num_null_units', 2),
+                )
+            else:
+                self.prompts = SimpleProposalMemory(emb_d=config.d_model, key_d=config.d_model,
+                    default_units=10, e_p_length=2, local_query=config.local_query)
             # self.prompts = FocusedProposalMemory(emb_d = config.d_model, key_d = config.d_model, default_units=10,
             #                                 e_p_length=2, local_query=config.local_query, focus=5.0)
 

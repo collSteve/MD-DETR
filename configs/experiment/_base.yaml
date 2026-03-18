@@ -55,4 +55,15 @@ q_to_ek_strategy: "query_bias"
 
 record_queries:  false
 
+# query_loss trains query_tf (nn.Linear 300*256 -> 300) to predict foreground proposals.
+# Only relevant for DynamicPrompt which collapses 300 proposals into one query via query_tf.
+# Per-proposal memories (SimpleProposalMemory, SelectiveProposalMemory) bypass query_tf —
+# they address memory directly with raw proposals. Disable for per-proposal memories.
 use_query_loss: true
+
+# --- SELECTIVE MEMORY (ANTI-INTERFERENCE) ---
+use_selective_memory:  false
+memory_focus:          10.0
+num_null_units:        2
+use_bg_suppression:    false
+lambda_bg:             0.1

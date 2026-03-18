@@ -243,6 +243,18 @@ def get_args_parser():
     parser.add_argument('--q_to_ek_strategy', type=str, default='query_bias',
                         help="Strategy for the Q-to-Ek memory module.")
 
+    # Selective memory (anti-interference)
+    parser.add_argument('--use_selective_memory', action='store_true',
+                        help='Use SelectiveProposalMemory instead of SimpleProposalMemory')
+    parser.add_argument('--memory_focus', default=10.0, type=float,
+                        help='Softmax temperature for selective memory (sim * focus)')
+    parser.add_argument('--num_null_units', default=2, type=int,
+                        help='Number of null memory units per task')
+    parser.add_argument('--use_bg_suppression', action='store_true',
+                        help='Enable background suppression loss')
+    parser.add_argument('--lambda_bg', default=0.1, type=float,
+                        help='Lambda for background suppression loss')
+
     return parser
 
 def validate_ortho_config(args):

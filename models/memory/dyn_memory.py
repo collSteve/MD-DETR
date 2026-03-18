@@ -6,15 +6,23 @@ from models.memory.base_prompt import BasePromptModule
 from models.prompt import Prompt, PromptParam
 
 class TaskMemory(nn.Module):
-    def __init__(self, emb_d, key_d, init_units, e_p_length, ortho=False):
+    def __init__(self, emb_d, key_d, init_units, e_p_length, ortho=False, num_null_units=0):
         super().__init__()
         self.emb_d, self.key_d, self.e_p_length = emb_d, key_d, e_p_length
         self.ortho = ortho
+        self.num_null_units = num_null_units
 
         self.p_list = nn.ParameterList()
         self.k_list = nn.ParameterList()
         self.a_list = nn.ParameterList()
         self.add_units(init_units)
+
+        if num_null_units > 0:
+            self.register_buffer('null_p', torch.zeros(num_null_units, e_p_length, emb_d))
+            self.null_k_list = nn.ParameterList([
+                nn.Parameter(nn.init.uniform_(torch.empty(key_d)))
+                for _ in range(num_null_units)
+            ])
     
     def reset_parameters(self):
         """Re-initializes every p/k/a in this task's memory."""
@@ -33,6 +41,9 @@ class TaskMemory(nn.Module):
                 nn.init.orthogonal_(a.unsqueeze(0))
             else:
                 nn.init.uniform_(a)
+        if hasattr(self, 'null_k_list'):
+            for k in self.null_k_list:
+                nn.init.uniform_(k)
 
     def add_units(self, num_units=1):
 
@@ -57,16 +68,26 @@ class TaskMemory(nn.Module):
         A = torch.stack(list(self.a_list), dim=0)
         return P, K, A
 
+    def forward_with_null(self):
+        """Returns (P, K, A) with null units appended. Used by SelectiveProposalMemory."""
+        P, K, A = self.forward()
+        if self.num_null_units > 0:
+            null_K = torch.stack(list(self.null_k_list), dim=0)
+            P = torch.cat([P, self.null_p], dim=0)
+            K = torch.cat([K, null_K], dim=0)
+        return P, K, A
+
 
 class DynamicPrompt(BasePromptModule):
-    def __init__(self, emb_d, key_d, default_units, e_p_length, 
+    def __init__(self, emb_d, key_d, default_units, e_p_length,
                  e_layers: Sequence[int] = [0,1,2,3,4,5], local_query: bool = False,
-                 ortho_mu=0.0,
+                 ortho_mu=0.0, num_null_units=0,
                  debug=False, debug_probe=None):
         super().__init__()
         self.emb_d, self.key_d, self.e_p_length = emb_d, key_d, e_p_length
         self.ortho_mu = ortho_mu
         self.default_units = default_units
+        self.num_null_units = num_null_units
 
         self.local_query = local_query
 
@@ -116,7 +137,8 @@ class DynamicPrompt(BasePromptModule):
                 key_d=self.key_d,
                 init_units=self.default_units,
                 e_p_length=self.e_p_length,
-                ortho=(self.ortho_mu > 0)
+                ortho=(self.ortho_mu > 0),
+                num_null_units=self.num_null_units,
             )
             # mem = mem.to(device)
             self.layer_memories[layer][tid] = mem
@@ -132,7 +154,8 @@ class DynamicPrompt(BasePromptModule):
                 key_d=self.key_d,
                 init_units=num_memory_units,
                 e_p_length=self.e_p_length,
-                ortho=self.ortho_mu > 0.0
+                ortho=self.ortho_mu > 0.0,
+                num_null_units=self.num_null_units,
             )
 
 
