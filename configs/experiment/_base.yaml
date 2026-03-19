@@ -61,6 +61,12 @@ record_queries:  false
 # they address memory directly with raw proposals. Disable for per-proposal memories.
 use_query_loss: true
 
+# --- INJECTION STRATEGY ---
+# How memory output is injected into decoder self-attention.
+# "prefix" = concatenate to K,V (300 prefix + 300 original = 600 tokens)
+# "additive_kv" = add directly to K,V (300 tokens, zero compute overhead)
+injection_strategy: "prefix"
+
 # --- SELECTIVE MEMORY (ANTI-INTERFERENCE) ---
 use_selective_memory:  false
 memory_focus:          10.0

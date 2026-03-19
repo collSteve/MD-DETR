@@ -14,3 +14,4 @@ lambda_bg: 0.1
 # and use raw proposals for addressing. Enabling query_loss here wastes compute on a 23M param
 # module that is never called in the forward path.
 use_query_loss: false
+injection_strategy: "prefix"

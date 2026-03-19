@@ -255,6 +255,10 @@ def get_args_parser():
     parser.add_argument('--lambda_bg', default=0.1, type=float,
                         help='Lambda for background suppression loss')
 
+    # Injection strategy
+    parser.add_argument('--injection_strategy', type=str, default='prefix',
+                        help="Memory injection: 'prefix' (concat to KV) or 'additive_kv' (add to KV)")
+
     return parser
 
 def validate_ortho_config(args):

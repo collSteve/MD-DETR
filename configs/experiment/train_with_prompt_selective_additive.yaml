@@ -1,0 +1,5 @@
+defaults:
+  - train_with_prompt_selective
+
+exp_name: selective_additive_kv
+injection_strategy: "additive_kv"

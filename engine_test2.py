@@ -71,6 +71,7 @@ class local_trainer(pl.LightningModule):
 		detr_config.use_selective_memory = getattr(args, 'use_selective_memory', False)
 		detr_config.memory_focus = getattr(args, 'memory_focus', 10.0)
 		detr_config.num_null_units = getattr(args, 'num_null_units', 2)
+		detr_config.injection_strategy = getattr(args, 'injection_strategy', 'prefix')
 
 		self.invalid_cls_logits = list(range(seen_classes, args.n_classes-1))
 		ModelClass = get_model_class(args.use_dual_memory_model)

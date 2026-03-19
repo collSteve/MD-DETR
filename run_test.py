@@ -74,6 +74,7 @@ def main(cfg: DictConfig):
     common.extend([
         "--memory_focus", str(cfg.experiment.get("memory_focus", 10.0)),
         "--num_null_units", str(cfg.experiment.get("num_null_units", 2)),
+        "--injection_strategy", cfg.experiment.get("injection_strategy", "prefix"),
     ])
     if cfg.experiment.get("use_bg_suppression", False):
         common.append("--use_bg_suppression")

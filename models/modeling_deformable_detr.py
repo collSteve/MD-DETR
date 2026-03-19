@@ -773,6 +773,9 @@ class DeformableDetrMultiheadAttention(nn.Module):
         if self.use_correspondence_embedding:
             self.correspondence_embedding = nn.Embedding(config.num_queries, embed_dim)
 
+        # Injection strategy: "prefix" (concat to K,V) or "additive_kv" (add to K,V)
+        self.injection_strategy = getattr(config, 'injection_strategy', 'prefix')
+
     def _shape(self, tensor: torch.Tensor, seq_len: int, batch_size: int):
         return tensor.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
 
@@ -828,21 +831,23 @@ class DeformableDetrMultiheadAttention(nn.Module):
 
         value_states = self.v_proj(hidden_states_original)
 
-        # prefix tuning
-        if prompt_list is not None and prefix_tuning:
+        # Memory injection
+        if prompt_list is not None:
             pk, pv = prompt_list
-            
-            # --- Correspondence ---
-            if self.use_correspondence_embedding:
-                # Add the same learned correspondence embedding to the memory keys
-                pk = pk + self.correspondence_embedding(correspondence_indices).unsqueeze(0)
-            elif self.use_positional_embedding_for_correspondence:
-                # Add the query's positional embedding to its corresponding memory key (pk).
-                if position_embeddings is not None:
-                    pk = pk + position_embeddings
 
-            key_states = torch.cat((pk,key_states), dim=1)
-            value_states = torch.cat((pv,value_states), dim=1)
+            if self.injection_strategy == 'additive_kv':
+                # Additive: add memory output directly to key/value states
+                key_states = key_states + pk
+                value_states = value_states + pv
+            elif prefix_tuning:
+                # Prefix tuning: concatenate memory as prefix tokens (default)
+                if self.use_correspondence_embedding:
+                    pk = pk + self.correspondence_embedding(correspondence_indices).unsqueeze(0)
+                elif self.use_positional_embedding_for_correspondence:
+                    if position_embeddings is not None:
+                        pk = pk + position_embeddings
+                key_states = torch.cat((pk, key_states), dim=1)
+                value_states = torch.cat((pv, value_states), dim=1)
 
         # print(f"key_states: {key_states.size()}, value_states: {value_states.size()}")
 
