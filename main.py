@@ -352,6 +352,9 @@ def main(args):
     # Validate orthogonality regularization configuration
     validate_ortho_config(args)
 
+    # Save experiment configuration
+    utils.save_experiment_config(args, out_dir_root, engine_name='main.py')
+
     args.task_label2name[args.n_classes-1] = "BG"
 
     if args.repo_name:

@@ -1,0 +1,9 @@
+defaults:
+  - train_with_prompt_selective
+
+# Ablation: softmax only (no null units, no bg loss)
+# Tests whether softmax itself helps or hurts vs raw cosine baseline
+exp_name: ablation_softmax_only_f1
+memory_focus: 1.0
+num_null_units: 0
+use_bg_suppression: false

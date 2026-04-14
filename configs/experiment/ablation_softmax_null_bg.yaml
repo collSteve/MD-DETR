@@ -1,0 +1,9 @@
+defaults:
+  - train_with_prompt_selective
+
+# Ablation: softmax + null units + bg loss (full selective, lower focus)
+# Tests whether bg loss helps on top of softmax + null
+exp_name: ablation_softmax_null_bg_f1
+memory_focus: 1.0
+num_null_units: 2
+use_bg_suppression: true

@@ -1,4 +1,6 @@
 import os
+import yaml
+import socket
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import subprocess
@@ -379,3 +381,113 @@ def compute_memory_orthogonality_loss(prompts, task_id, device):
 				loss_ortho_inter = loss_ortho_inter + cross_gram.pow(2).sum()
 
 	return loss_ortho_inter, loss_ortho_intra
+
+
+def save_experiment_config(args, out_dir, engine_name):
+    """Save full experiment configuration to YAML and print a summary.
+
+    Creates 'experiment_config.yaml' in out_dir with structured key parameters
+    for quick reference and full reproducibility.
+    """
+    memory_type = 'SelectiveProposalMemory' if getattr(args, 'use_selective_memory', False) else 'SimpleProposalMemory'
+
+    config = {
+        'experiment': {
+            'timestamp': datetime.datetime.now().isoformat(),
+            'engine': engine_name,
+            'hostname': socket.gethostname(),
+        },
+        'memory': {
+            'type': memory_type,
+            'injection_strategy': getattr(args, 'injection_strategy', 'prefix'),
+            'memory_focus': getattr(args, 'memory_focus', 10.0),
+            'num_null_units': getattr(args, 'num_null_units', 2),
+            'use_prompts': args.use_prompts,
+            'local_query': args.local_query,
+        },
+        'losses': {
+            'use_bg_suppression': getattr(args, 'use_bg_suppression', False),
+            'lambda_bg': getattr(args, 'lambda_bg', 0.1),
+            'use_ortho_regularization': getattr(args, 'use_ortho_regularization', False),
+            'lambda_ortho_inter': args.lambda_ortho_inter,
+            'lambda_ortho_intra': args.lambda_ortho_intra,
+            'use_query_loss': getattr(args, 'use_query_loss', False),
+            'lambda_query': args.lambda_query,
+            'cls_loss_coef': args.cls_loss_coef,
+            'bbox_loss_coef': args.bbox_loss_coef,
+            'giou_loss_coef': args.giou_loss_coef,
+            'focal_alpha': args.focal_alpha,
+            'set_cost_class': args.set_cost_class,
+            'set_cost_bbox': args.set_cost_bbox,
+            'set_cost_giou': args.set_cost_giou,
+        },
+        'training': {
+            'lr': args.lr,
+            'lr_old': args.lr_old,
+            'weight_decay': args.weight_decay,
+            'clip_max_norm': args.clip_max_norm,
+            'epochs': args.epochs,
+            'batch_size': args.batch_size,
+            'save_epochs': args.save_epochs,
+            'eval_epochs': args.eval_epochs,
+            'freeze': args.freeze,
+            'new_params': args.new_params,
+            'seed': args.seed,
+            'resume': args.resume,
+            'n_gpus': args.n_gpus,
+        },
+        'continual': {
+            'n_tasks': args.n_tasks,
+            'start_task': args.start_task,
+            'n_classes': args.n_classes,
+            'split_point': args.split_point,
+            'task_order': getattr(args, 'task_order', None),
+            'bg_thres': args.bg_thres,
+            'bg_thres_topk': args.bg_thres_topk,
+            'mask_gradients': args.mask_gradients,
+        },
+        'other_features': {
+            'use_correspondence_embedding': getattr(args, 'use_correspondence_embedding', False),
+            'use_positional_embedding_for_correspondence': getattr(args, 'use_positional_embedding_for_correspondence', False),
+            'use_dual_memory_model': getattr(args, 'use_dual_memory_model', False),
+            'dual_memory_strategy': getattr(args, 'dual_memory_strategy', 'hybrid_everywhere'),
+            'q_to_ek_strategy': getattr(args, 'q_to_ek_strategy', 'query_bias'),
+        },
+        'paths': {
+            'output_dir': args.output_dir,
+            'repo_name': args.repo_name,
+            'checkpoint_dir': args.checkpoint_dir,
+            'checkpoint_base': args.checkpoint_base,
+            'checkpoint_next': args.checkpoint_next,
+            'train_img_dir': args.train_img_dir,
+            'test_img_dir': args.test_img_dir,
+            'task_ann_dir': args.task_ann_dir,
+        },
+    }
+
+    os.makedirs(out_dir, exist_ok=True)
+    config_path = os.path.join(out_dir, 'experiment_config.yaml')
+    with open(config_path, 'w') as f:
+        f.write(f"# Experiment configuration — {engine_name}\n")
+        f.write(f"# Generated: {config['experiment']['timestamp']}\n\n")
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+    m = config['memory']
+    lo = config['losses']
+    t = config['training']
+    print("=" * 60)
+    print("EXPERIMENT CONFIGURATION")
+    print("=" * 60)
+    print(f"  Engine:           {engine_name}")
+    print(f"  Memory:           {m['type']}")
+    print(f"  Injection:        {m['injection_strategy']}")
+    print(f"  Focus:            {m['memory_focus']}")
+    print(f"  Null units:       {m['num_null_units']}")
+    print(f"  BG suppression:   {lo['use_bg_suppression']} (lambda={lo['lambda_bg']})")
+    print(f"  Ortho:            {lo['use_ortho_regularization']} (inter={lo['lambda_ortho_inter']}, intra={lo['lambda_ortho_intra']})")
+    print(f"  Query loss:       {lo['use_query_loss']} (lambda={lo['lambda_query']})")
+    print(f"  Freeze:           {t['freeze']}")
+    print(f"  LR:               {t['lr']} / LR_old: {t['lr_old']}")
+    print(f"  Epochs:           {t['epochs']} / Batch: {t['batch_size']}")
+    print(f"  Config saved to:  {config_path}")
+    print("=" * 60)

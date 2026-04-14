@@ -1,0 +1,9 @@
+defaults:
+  - train_with_prompt_selective
+
+# Ablation: softmax + null units (no bg loss)
+# Tests whether null units help on top of softmax
+exp_name: ablation_softmax_null_f1
+memory_focus: 1.0
+num_null_units: 2
+use_bg_suppression: false
