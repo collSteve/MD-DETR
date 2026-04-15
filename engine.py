@@ -175,6 +175,9 @@ class local_trainer(pl.LightningModule):
 		fh.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
 		self._mem_logger.addHandler(fh)
 
+		# Lazy-loaded prototype classifier (used only when --use_prototype_classifier is set)
+		self._prototype_store = None
+
 	def get_probe_status(self):
 		if self.prompts is None:
 			return False
@@ -330,6 +333,19 @@ class local_trainer(pl.LightningModule):
 				loss += self.args.lambda_bg * bg_loss
 
 		if return_outputs:
+
+			# Prototype classifier swap (before mask_gradients)
+			if getattr(self.args, 'use_prototype_classifier', False):
+				if self._prototype_store is None:
+					from models.prototype_classifier import PrototypeStore
+					self._prototype_store = PrototypeStore.load(self.args.prototypes_path, device=self.device)
+				proto_scores = self._prototype_store.score(
+					outputs.last_hidden_state,
+					temperature=getattr(self.args, 'prototype_temperature', 10.0),
+					unseen_value=-10e10,
+				)  # (B, 300, 80)
+				bg_col = outputs.logits[:, :, -1:]
+				outputs.logits = torch.cat([proto_scores, bg_col], dim=-1)  # (B, 300, 81)
 
 			if self.args.mask_gradients:
 				outputs.logits[:,:, self.invalid_cls_logits] = -10e10

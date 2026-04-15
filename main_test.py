@@ -259,6 +259,20 @@ def get_args_parser():
     parser.add_argument('--injection_strategy', type=str, default='prefix',
                         help="Memory injection: 'prefix' (concat to KV) or 'additive_kv' (add to KV)")
 
+    # Post-hoc prototype classifier (diagnostic)
+    parser.add_argument('--use_prototype_classifier', action='store_true',
+                        help='At eval, replace class_embed logits with cosine similarity to saved prototypes.')
+    parser.add_argument('--prototypes_path', default='', type=str,
+                        help='Path to prototypes.pt (required when use_prototype_classifier is True).')
+    parser.add_argument('--prototype_temperature', default=10.0, type=float,
+                        help='Temperature for cosine-similarity logits.')
+    parser.add_argument('--extract_prototypes', action='store_true',
+                        help='Run prototype extraction instead of train/eval.')
+    parser.add_argument('--prototypes_out_path', default='', type=str,
+                        help='Output path for extracted prototypes (default: {output_dir}/prototypes.pt).')
+    parser.add_argument('--prototype_checkpoint_path', default='', type=str,
+                        help='Explicit checkpoint to load for extraction.')
+
     return parser
 
 def validate_ortho_config(args):
@@ -300,6 +314,16 @@ def validate_ortho_config(args):
         print("    3) Set lambda_ortho_intra > 0.0 (for intra-task orthogonality)")
         print("=" * 80)
         print()
+
+def validate_prototype_config(args):
+    """Validate prototype classifier flags are self-consistent."""
+    if args.use_prototype_classifier and not args.prototypes_path:
+        raise ValueError("--use_prototype_classifier requires --prototypes_path to be set.")
+    if args.extract_prototypes and args.use_prototype_classifier:
+        raise ValueError("Cannot set both --extract_prototypes and --use_prototype_classifier.")
+    if args.use_prototype_classifier and not args.eval:
+        print("WARNING: --use_prototype_classifier is set but --eval is not; "
+              "the prototype classifier only takes effect in the eval path.")
 
 def main(args):
 
@@ -351,6 +375,7 @@ def main(args):
 
     # Validate orthogonality regularization configuration
     validate_ortho_config(args)
+    validate_prototype_config(args)
 
     # Save experiment configuration
     utils.save_experiment_config(args, out_dir_root, engine_name='main_test.py')
@@ -362,6 +387,22 @@ def main(args):
     else:
         processor = DeformableDetrImageProcessor()
     #print('set up processor ...')
+
+    # Prototype extraction mode: runs instead of train/eval loop
+    if args.extract_prototypes:
+        args.task = str(args.n_tasks)
+        dummy_tr_ann = os.path.join(args.task_ann_dir, f'train_task_{args.n_tasks}.json')
+        dummy_dataset = CocoDetection(img_folder=args.train_img_dir, ann_file=dummy_tr_ann, processor=processor)
+        dummy_loader = DataLoader(dummy_dataset, collate_fn=dummy_dataset.collate_fn, batch_size=1, num_workers=0)
+        coco_eval = CocoEvaluator(dummy_dataset.coco, args.iou_types)
+        local_eval = Evaluator(processor=processor, test_dataset=dummy_dataset, test_dataloader=dummy_loader,
+                               coco_evaluator=coco_eval, args=args, task_label2name=args.task_label2name, task_name='cur')
+        trainer = local_trainer(train_loader=dummy_loader, val_loader=dummy_loader,
+                                test_dataset=dummy_dataset, args=args, local_evaluator=local_eval,
+                                task_id=args.n_tasks)
+        from tools.extract_prototypes import run_prototype_extraction
+        run_prototype_extraction(args=args, processor=processor, out_dir_root=out_dir_root, trainer=trainer)
+        return
 
     checkpoint_callback = ModelCheckpoint(dirpath=args.output_dir, filename='{epoch}')
     logger = CSVLogger(save_dir=args.output_dir, name="lightning_logs")

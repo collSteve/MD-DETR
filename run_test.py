@@ -79,6 +79,18 @@ def main(cfg: DictConfig):
     if cfg.experiment.get("use_bg_suppression", False):
         common.append("--use_bg_suppression")
 
+    # --- Prototype classifier flags ---
+    if cfg.experiment.get("use_prototype_classifier", False):
+        common.append("--use_prototype_classifier")
+    if cfg.experiment.get("extract_prototypes", False):
+        common.append("--extract_prototypes")
+    common.extend([
+        "--prototypes_path", str(cfg.experiment.get("prototypes_path", "")),
+        "--prototype_temperature", str(cfg.experiment.get("prototype_temperature", 10.0)),
+        "--prototypes_out_path", str(cfg.experiment.get("prototypes_out_path", "")),
+        "--prototype_checkpoint_path", str(cfg.experiment.get("prototype_checkpoint_path", "")),
+    ])
+
     # --- Correspondence embedding flags to the CLI call if they are true ---
     if cfg.experiment.get("use_correspondence_embedding", False):
         common.append("--use_correspondence_embedding")

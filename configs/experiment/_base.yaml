@@ -73,3 +73,14 @@ memory_focus:          10.0
 num_null_units:        2
 use_bg_suppression:    false
 lambda_bg:             0.1
+
+# --- POST-HOC PROTOTYPE CLASSIFIER ---
+# Swap class_embed logits for cosine similarity to saved prototypes at eval.
+# Training is untouched; this is purely an evaluation-time diagnostic.
+use_prototype_classifier: false
+prototypes_path:          ""
+prototype_temperature:    10.0
+# Extraction-only flags (runs instead of train/eval)
+extract_prototypes:          false
+prototypes_out_path:         ""
+prototype_checkpoint_path:   ""

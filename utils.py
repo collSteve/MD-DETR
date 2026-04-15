@@ -453,6 +453,14 @@ def save_experiment_config(args, out_dir, engine_name):
             'dual_memory_strategy': getattr(args, 'dual_memory_strategy', 'hybrid_everywhere'),
             'q_to_ek_strategy': getattr(args, 'q_to_ek_strategy', 'query_bias'),
         },
+        'prototypes': {
+            'use_prototype_classifier': getattr(args, 'use_prototype_classifier', False),
+            'prototypes_path': getattr(args, 'prototypes_path', ''),
+            'prototype_temperature': getattr(args, 'prototype_temperature', 10.0),
+            'extract_prototypes': getattr(args, 'extract_prototypes', False),
+            'prototypes_out_path': getattr(args, 'prototypes_out_path', ''),
+            'prototype_checkpoint_path': getattr(args, 'prototype_checkpoint_path', ''),
+        },
         'paths': {
             'output_dir': args.output_dir,
             'repo_name': args.repo_name,
@@ -489,5 +497,7 @@ def save_experiment_config(args, out_dir, engine_name):
     print(f"  Freeze:           {t['freeze']}")
     print(f"  LR:               {t['lr']} / LR_old: {t['lr_old']}")
     print(f"  Epochs:           {t['epochs']} / Batch: {t['batch_size']}")
+    p = config['prototypes']
+    print(f"  Prototypes:       extract={p['extract_prototypes']}  use={p['use_prototype_classifier']}  T={p['prototype_temperature']}")
     print(f"  Config saved to:  {config_path}")
     print("=" * 60)
