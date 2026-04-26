@@ -166,6 +166,9 @@ python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_2_l_10_mem_units_ECHO_10 experiment.start_task=2 experiment.checkpoint_next="checkpoint09.pth"
 
 
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_2_l_10_mem_units_ECHO_10 experiment.start_task=2 experiment.checkpoint_next="checkpoint09.pth"
+
+
 
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dynamic_memory_correctness_2
 
@@ -175,9 +178,22 @@ python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_
 
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dynamic_memory_L2_mem_u_25_pl_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
 
+# dynamic memory:
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dynamic_memory_epoch_6_frozen_qn experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
+
+python run_test.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dynamic_memory_epoch_6_frozen_qn experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
 
 # proposal query memory:
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_pqm_u_10_epoch_6_no_query_loss experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_query_loss=False
+
+python run_test.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_u_10_epoch_6_frozen_qn experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
+
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_simple_qK_mem_u_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
+
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_pqm_simple_qK_mem_u_10_epoch_10 experiment.checkpoint_base="checkpoint09.pth" experiment.checkpoint_next="checkpoint09.pth"
+
+python run_test.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_pqm_simple_qK_mem_u_10_epoch_6_frozen_qn experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
 
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_proposal_query_memory_softmax_cos_focus_5_mem_u_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth"
 
@@ -212,18 +228,209 @@ python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_
 
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_pqm_mem_unit_10_learnable_corr_embed experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_correspondence_embedding=True
 
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_pqm_mem_unit_10_learnable_corr_embed_frozen_qn experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_correspondence_embedding=True
+
 # Dual Memory
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dual_mem_query_bias_mem_u_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_dual_memory_model=True
 
 python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dual_mem_phased_global_specific_3_output_bias_mem_u_10_epoch_6 experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_dual_memory_model=True experiment.dual_memory_strategy=phased_global_specific experiment.q_to_ek_strategy=output_bias
 
 # inspect query record
+python run_test.py run.local=true experiment=validate_with_frozen_query_fn shared=shield experiment.exp_name=validate_frozen_separated_qn experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_proposal_query_memory_l_2_mem_units_10_ECHO_t1_11_t234_10_correctness/Task_1 experiment.checkpoint_next="checkpoint09.pth" experiment.checkpoint_base="checkpoint10.pth" experiment.start_task=1 experiment.n_tasks=2 experiment.record_queries=true
+
+python run_test.py run.local=true experiment=validate_with_prompt shared=shield experiment.exp_name=validate_frozen_separated_qn_v_w_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_proposal_query_memory_l_2_mem_units_10_ECHO_t1_11_t234_10_correctness/Task_1 experiment.checkpoint_next="checkpoint09.pth" experiment.checkpoint_base="checkpoint10.pth" experiment.start_task=1 experiment.n_tasks=2 experiment.record_queries=true
+
 conda run -n MD-DETR python /home/kren04/shield/MD-DETR/analysis/inspect_query_data.py --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries
 
 conda run -n MD-DETR python /home/kren04/shield/MD-DETR/analysis/verify_query_constancy.py --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries
 
 python -m analysis.verify_query_constancy --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries
 
+
+## new 
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_pqm_simple_qK_mem_u_10_epoch_10 experiment.checkpoint_base="checkpoint09.pth" experiment.checkpoint_next="checkpoint09.pth"
+
+python run_test.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_dynamic_memory_epoch_6_query_loss_frozen_qn experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" 
+
+python run.py run.local=true experiment=train_with_prompt experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment.exp_name=train_pqm_u_10_epoch_6_no_query_loss experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.use_query_loss=False
+
+
+python run.py run.local=true experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment=train_with_prompt_ortho_inter experiment.exp_name=train_pqm_simple_qk_ortho_regularization_inter_0.02_intra_0.01_u_10_epoch_6_no_query_loss_run_Fixed experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.local_query=1 experiment.use_query_loss=false experiment.lambda_ortho_inter=0.02 experiment.lambda_ortho_intra=0.01
+
+python run_test.py run.local=true experiment.checkpoint_dir=/ubc/cs/research/shield/projects/kren04/MD_DETR_runs/upload/checkpoints/Task_1 shared=shield experiment=train_with_prompt_ortho_inter experiment.exp_name=train_pqm_simple_qk_ortho_regularization_inter_0.02_intra_0.01_u_10_epoch_6_no_query_loss_run_run_test experiment.checkpoint_base="checkpoint05.pth" experiment.checkpoint_next="checkpoint05.pth" experiment.local_query=1 experiment.use_query_loss=false experiment.lambda_ortho_inter=0.02 experiment.lambda_ortho_intra=0.01
+
+### frozen queries:
+/home/kren04/shield/MD_DETR_runs/constancy_frozen_separated_qn2
+/home/kren04/shield/MD_DETR_runs/validate_frozen_separated_qn_v_w_prompt
+```
+
+## Query Analysis Tools
+
+### 1. Query Geometry Visualization (UMAP)
+
+Visualize query geometry in 2D UMAP space to understand how queries cluster and drift across tasks.
+
+**Basic Usage:**
+```bash
+# Centroid plot: Mean of 300 queries per context
+python -m analysis.visualize_query_geometry \
+  --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries \
+  --plot_type centroid \
+  --num_images 8 \
+  --output_dir outputs/analysis/query_geometry
+
+# Full plot: All 300 queries visualized individually
+python -m analysis.visualize_query_geometry \
+  --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries \
+  --plot_type full \
+  --num_images 3 \
+  --output_dir outputs/analysis/query_geometry
+```
+
+**With Arrow Visualization (shows query drift across tasks):**
+```bash
+# Centroid plot with arrows
+python -m analysis.visualize_query_geometry \
+  --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries \
+  --plot_type centroid \
+  --num_images 5 \
+  --draw_arrows \
+  --output_dir outputs/analysis/query_geometry
+
+# Full plot with arrows (shows individual query trajectories)
+python -m analysis.visualize_query_geometry \
+  --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries \
+  --plot_type full \
+  --num_images 2 \
+  --draw_arrows \
+  --output_dir outputs/analysis/query_geometry
+```
+
+**Parameters:**
+- `--exp_dir`: Path to experiment directory containing `query_data_*.pkl` files
+- `--plot_type`: `centroid` (mean of queries) or `full` (all 300 queries)
+- `--num_images`: Number of images to sample for visualization
+- `--draw_arrows`: (Optional) Draw arrows showing query drift from T{N}-cur to T{N+1} contexts
+- `--output_dir`: Output directory for plots (default: `outputs/analysis/query_geometry`)
+
+**Arrow Features:**
+- **Color-coded by image**: Each image's arrows match its scatter point color
+- **Linestyle by target context**:
+  - Solid line (`-`): T{N}-cur → T{N+1}-cur (same validation type)
+  - Dashed line (`--`): T{N}-cur → T{N+1}-prev (previous tasks)
+  - Dotted line (`:`): T{N}-cur → T{N+1}-all (all tasks)
+- **Centroid mode**: One arrow per context pair
+- **Full mode**: Individual arrows for each query index (300 per image)
+
+**Output:**
+- `{plot_type}_query_visualization_{N}_images.png` (without arrows)
+- `{plot_type}_query_visualization_{N}_images_with_arrows.png` (with arrows)
+
+---
+
+### 2. Query Drift Analysis by Index
+
+Analyze whether query drift correlates with query index (0-299) by measuring Euclidean distance in original 256D space.
+
+**Mode A: Aggregate Analysis (mean across multiple images)**
+```bash
+# Analyze T1→T2 transition with 50 random images
+python -m analysis.analyze_query_drift_by_index \
+  --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries \
+  --source_task 1 \
+  --target_task 2 \
+  --aggregate \
+  --num_images 50 \
+  --output_dir outputs/analysis/query_drift
+
+# Use all available images (omit --num_images)
+python -m analysis.analyze_query_drift_by_index \
+  --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries \
+  --source_task 1 \
+  --target_task 2 \
+  --aggregate \
+  --output_dir outputs/analysis/query_drift
+```
+
+**Mode B: Per-Image Analysis (compare specific images)**
+```bash
+# Analyze specific images (show individual drift patterns)
+python -m analysis.analyze_query_drift_by_index \
+  --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries \
+  --source_task 1 \
+  --target_task 2 \
+  --image_ids 161799 15660 530624 \
+  --output_dir outputs/analysis/query_drift
+
+# Compare many images (up to 10 shown in legend)
+python -m analysis.analyze_query_drift_by_index \
+  --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries \
+  --source_task 1 \
+  --target_task 2 \
+  --image_ids 161799 15660 530624 463618 201934 \
+  --output_dir outputs/analysis/query_drift
+```
+
+**Per-Task Transition Analysis:**
+```bash
+# T1→T2 transition
+python -m analysis.analyze_query_drift_by_index \
+  --exp_dir /path/to/exp \
+  --source_task 1 --target_task 2 \
+  --aggregate --num_images 100
+
+# T2→T3 transition
+python -m analysis.analyze_query_drift_by_index \
+  --exp_dir /path/to/exp \
+  --source_task 2 --target_task 3 \
+  --aggregate --num_images 100
+
+# T3→T4 transition
+python -m analysis.analyze_query_drift_by_index \
+  --exp_dir /path/to/exp \
+  --source_task 3 --target_task 4 \
+  --aggregate --num_images 100
+```
+
+**Parameters:**
+- `--exp_dir`: Path to experiment directory containing `query_data_*.pkl` files
+- `--source_task`: Source task number (e.g., 1 for T1)
+- `--target_task`: Target task number (e.g., 2 for T2)
+- **Mode selection (required, mutually exclusive):**
+  - `--aggregate`: Aggregate mode (compute mean ± std across images)
+  - `--image_ids`: Per-image mode (space-separated list of image IDs)
+- `--num_images`: (Aggregate mode only) Number of images to sample (default: all)
+- `--output_dir`: Output directory (default: `outputs/analysis/query_drift`)
+
+**Output:**
+
+*Aggregate mode:*
+- `drift_T{src}_to_T{tgt}_aggregate_{N}images.png` - Line plot with mean ± std
+- `drift_T{src}_to_T{tgt}_{cur/prev/all}_aggregate_{N}images.csv` - Raw data (3 CSV files)
+
+*Per-image mode:*
+- `drift_T{src}_to_T{tgt}_images_{id1}_{id2}_{id3}.png` - 3-subplot comparison
+- `drift_T{src}_to_T{tgt}_{cur/prev/all}_images_{id1}_{id2}_{id3}.csv` - Raw data (3 CSV files)
+
+**Plot Interpretation:**
+- **X-axis**: Query index (0-299)
+- **Y-axis**: Euclidean distance in 256D space
+- **Blue solid line**: T{N}-cur → T{N+1}-cur
+- **Orange dashed line**: T{N}-cur → T{N+1}-prev
+- **Green dotted line**: T{N}-cur → T{N+1}-all
+- **Shaded area** (aggregate): ± 1 standard deviation
+
+---
+
+### Legacy Examples
+```bash
+python -m analysis.visualize_query_geometry --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries --plot_type centroid --num_images 8  --output_dir outputs/analysis/dynamic_queries
+
+python -m analysis.visualize_query_geometry --exp_dir /home/kren04/shield/MD_DETR_runs/constancy_check_queries --plot_type full --num_images 3  --output_dir outputs/analysis/dynamic_queries
+
+python -m analysis.visualize_query_geometry --exp_dir /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/constancy_frozen_separated_qn2 --plot_type full --num_images 3  --output_dir outputs/analysis/dynamic_queries_frozen_separated_qn2
+
+python -m analysis.visualize_query_geometry --exp_dir /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/constancy_frozen_separated_qn --plot_type full --num_images 3  --output_dir outputs/analysis/dynamic_queries_frozen_separated_qn
 ```
 
 ```python
@@ -264,6 +471,262 @@ This uses the hybrid mechanism for the first 3 layers and switches to only <Q-to
 ```
 python run.py run.local=true experiment=train_with_prompt experiment.exp_name=train_dual_mem_phased_hybrid_specific experiment.use_dual_memory_model=True experiment.dual_memory_strategy=phased_hybrid_specific experiment.dual_memory_switch_layer=3 ...
 ```
+
+---
+
+## Orthogonality Regularization
+
+**NEW: Memory Interference Solution**
+
+To address the **two-way memory interference problem** in continual learning (where old frozen memories interfere with new task learning, and new memories interfere with old task recall), we've implemented **orthogonality regularization** that forces memory key vectors from different tasks to occupy orthogonal subspaces.
+
+### The Two-Way Problem
+
+**Direction 1 (Old → New)**: Frozen old memories accidentally match new queries → mAP@C drops (58% → 31%)
+**Direction 2 (New → Old)**: New memories accidentally match old queries → mAP@P catastrophic forgetting (drops to 16%)
+
+**Root Cause**: All memory K vectors exist in shared 256D space with no task boundaries.
+
+### Solution: Three Approaches
+
+**Approach 1 (Global Orthogonality)**: All memory units orthogonal to each other
+**Approach 2 (Inter-task Only)**: Memory units from different tasks orthogonal
+**Approach 3 (Inter + Intra)**: Both cross-task and within-task orthogonality
+
+Mathematical relationship: Approach 3 subsumes both (set `λ_inter = 2×λ_intra` for Approach 1, set `λ_intra=0` for Approach 2)
+
+### Usage
+
+Orthogonality regularization is controlled by three parameters:
+- `use_ortho_regularization`: Boolean flag to enable/disable the feature (default: `false`)
+- `lambda_ortho_inter`: Weight for inter-task (cross-task) orthogonality (only effective when flag=`true`)
+- `lambda_ortho_intra`: Weight for intra-task (within-task) orthogonality (only effective when flag=`true`)
+
+**Predefined Experiment Configs:**
+
+We provide three ready-to-use configurations in `configs/experiment/`:
+1. **`train_with_prompt_ortho_inter.yaml`** - Inter-task only (Approach 2, recommended)
+2. **`train_with_prompt_ortho_global.yaml`** - Global orthogonality (Approach 1)
+3. **`train_with_frozen_query_fn_ortho.yaml`** - Frozen query + inter-task orthogonality
+
+#### Example 0: Baseline Without Regularization
+
+To run without any orthogonality regularization (baseline for comparison):
+```bash
+python run.py run.local=true \
+    experiment=train_with_prompt \
+    experiment.use_ortho_regularization=false \
+    shared=shield
+```
+
+**Note:** The flag defaults to `false`, so you can also simply use `experiment=train_with_prompt` without explicitly setting the flag.
+
+#### Example 1: Inter-task Only (Approach 2 - Recommended)
+
+Use the predefined config:
+```bash
+python run.py run.local=true \
+    experiment=train_with_prompt_ortho_inter \
+    shared=shield
+```
+
+Or override from base config:
+```bash
+python run.py run.local=true \
+    experiment=train_with_prompt \
+    experiment.use_ortho_regularization=true \
+    experiment.lambda_ortho_inter=0.01 \
+    experiment.lambda_ortho_intra=0.0 \
+    experiment.exp_name=my_ortho_experiment \
+    shared=shield
+```
+
+#### Example 2: Global Orthogonality (Approach 1)
+
+```bash
+python run.py run.local=true \
+    experiment=train_with_prompt_ortho_global \
+    shared=shield
+```
+
+#### Example 3: Frozen Query Function + Orthogonality
+
+Guarantees query stability (queries never drift) while preventing memory interference:
+
+```bash
+python run_test.py run.local=true \
+    experiment=train_with_frozen_query_fn_ortho \
+    shared=shield
+```
+
+**Note**: `run_test.py` uses `main_test.py` with a separate frozen query function model that never updates, eliminating query drift entirely.
+
+#### Example 4: Custom Lambda Values
+
+Test different hyperparameter values:
+```bash
+# Higher inter-task regularization
+python run.py run.local=true \
+    experiment=train_with_prompt \
+    experiment.use_ortho_regularization=true \
+    experiment.lambda_ortho_inter=0.05 \
+    experiment.lambda_ortho_intra=0.01 \
+    experiment.exp_name=ortho_custom_high \
+    shared=shield
+
+# Grid search across lambda values
+for lambda in 0.001 0.01 0.05 0.1; do
+    python run.py run.local=true \
+        experiment=train_with_prompt_ortho_inter \
+        experiment.lambda_ortho_inter=$lambda \
+        experiment.exp_name=ortho_inter_${lambda} \
+        shared=shield
+done
+```
+
+#### Example 5: Advanced - Custom Query Settings
+
+Control query representation and query loss independently:
+```bash
+# Use per-proposal queries WITHOUT query loss
+python run.py run.local=true \
+    experiment=train_with_prompt_ortho_inter \
+    experiment.local_query=1 \
+    experiment.use_query_loss=false \
+    shared=shield
+
+# Use averaged query (simpler, no per-proposal memory)
+python run.py run.local=true \
+    experiment=train_with_prompt_ortho_inter \
+    experiment.local_query=0 \
+    shared=shield
+```
+
+**Key Parameters:**
+- `local_query=1`: Per-proposal queries (300 queries/image) - more expressive
+- `local_query=0`: Image-level query (averaged) - simpler
+- `use_query_loss=true`: Apply query loss regularization (default)
+- `use_query_loss=false`: Disable query loss (useful for isolating orthogonality effects)
+
+### Monitoring
+
+**Configuration Validation:**
+At startup, the system validates your orthogonality regularization configuration and prints warnings if:
+- `use_ortho_regularization=false` but lambda values are non-zero (lambdas will be ignored)
+- `use_ortho_regularization=true` but both lambdas are 0.0 (wasted computation)
+
+**Training Progress:**
+During training, the progress bar displays:
+- **`O_i`**: Inter-task orthogonality loss value
+- **`O_a`**: Intra-task orthogonality loss value
+
+These values should **decrease** during training as K vectors become more orthogonal.
+
+**Note:** If `use_ortho_regularization=false`, these metrics will not appear in the progress bar (regularization is completely disabled).
+
+Example progress bar:
+```
+Epoch 2: 100%|████| 500/500 [10:23<00:00, tr=2.34, ce=0.89, giou=0.45, O_i=15.32, O_a=8.76]
+```
+
+### Mathematical Foundation
+
+**Inter-task Loss** (per layer):
+```
+loss_inter = ||K_current_norm @ K_old_norm^T||²_F
+```
+Forces K vectors from different tasks to be orthogonal (zero dot product).
+
+**Intra-task Loss** (per layer):
+```
+loss_intra = ||K_current_norm @ K_current_norm^T - I||²_F
+```
+Forces K vectors within current task to be orthogonal.
+
+**Total Training Loss**:
+```
+loss = detection_loss + λ_inter × loss_inter + λ_intra × loss_intra
+```
+
+### Expected Outcomes
+
+✅ **Reduced mAP@C degradation**: New tasks learn without old memory interference
+✅ **Reduced mAP@P catastrophic forgetting**: New memories don't interfere with old task recall
+✅ **Improved mAP@A**: Better overall performance across all seen tasks
+✅ **Observable orthogonality**: K vectors from different tasks geometrically separated
+
+**Note on Task 1:**
+- Intra-task regularization (O_a) applies to Task 1, promoting diverse memory representations
+- Inter-task regularization (O_i) is 0.0 for Task 1 (no old tasks exist yet)
+
+### Hyperparameter Tuning
+
+**Recommended starting values:**
+- Start with `λ_inter = 0.01`, `λ_intra = 0.0` (Approach 2) - Use `train_with_prompt_ortho_inter` config
+- If still seeing interference, increase to `λ_inter = 0.05` or `0.1`
+- Try `λ_inter = 0.02`, `λ_intra = 0.01` for global orthogonality (Approach 1) - Use `train_with_prompt_ortho_global` config
+- Monitor O_i and O_a values in progress bar - they should decrease and stabilize
+
+**Grid search example:**
+```bash
+# Test different lambda_inter values with Hydra
+for lambda in 0.001 0.01 0.05 0.1; do
+    python run.py run.local=true \
+        experiment=train_with_prompt_ortho_inter \
+        experiment.lambda_ortho_inter=$lambda \
+        experiment.exp_name=ortho_grid_${lambda} \
+        shared=shield
+done
+
+# With frozen queries (test variant)
+for lambda in 0.001 0.01 0.05 0.1; do
+    python run_test.py run.local=true \
+        experiment=train_with_frozen_query_fn_ortho \
+        experiment.lambda_ortho_inter=$lambda \
+        experiment.exp_name=frozen_ortho_${lambda} \
+        shared=shield
+done
+```
+
+**Slurm batch submission:**
+```bash
+# Submit to cluster with Slurm launcher
+python run.py \
+    experiment=train_with_prompt_ortho_inter \
+    sbatch=train_sbatch \
+    hydra/launcher=slurm \
+    hydra.verbose=true
+```
+
+### Implementation Details
+
+- **Guard Condition**: Applied when `train=True`, `use_prompts=True`, and `use_ortho_regularization=True`
+- **Task-Specific Behavior**:
+  - Task 1: Only intra-task loss computed (no old tasks to be orthogonal to)
+  - Task 2+: Both inter-task and intra-task losses computed
+- **Per-Layer Aggregation**: Sums orthogonality losses across all decoder layers (0-5)
+- **Automatic Gradient Flow**: No manual hooks needed - PyTorch autograd handles it
+- **DDP Compatible**: Works seamlessly with distributed training
+- **No Performance Overhead**: Minimal computational cost (one matrix multiplication per layer)
+
+### Troubleshooting
+
+**Issue**: O_i/O_a values not decreasing
+- **Solution**: Increase lambda values, check that `use_prompts=1` and `use_ortho_regularization=true`
+
+**Issue**: Training diverges or mAP drops significantly
+- **Solution**: Lambda values too high - reduce by 10x and retry
+
+**Issue**: No O_i/O_a in progress bar
+- **Solution**: Check that `use_ortho_regularization=true`. Note: O_i (inter-task) will be 0.0 for Task 1 (expected behavior)
+
+### Related Documentation
+
+- **Full Analysis**: See `MEMORY_INTERFERENCE_SOLUTIONS.md` for complete derivation and experimental protocol
+- **Implementation**: Core logic in `utils.py:compute_memory_orthogonality_loss()`
+- **Integration**: `engine.py` and `engine_test2.py` common_step() methods
+
+---
 
 ## New Weight Analysis:
 Here are some examples of how you can run it:

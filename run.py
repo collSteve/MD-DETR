@@ -60,6 +60,78 @@ def main(cfg: DictConfig):
     if cfg.experiment.record_probes:
         common.append("--record_probes")
 
+    if cfg.experiment.record_queries:
+        common.append("--record_queries")
+
+    if cfg.experiment.use_query_loss:
+        common.append("--use_query_loss")
+
+    if cfg.experiment.get("use_ortho_regularization", False):
+        common.append("--use_ortho_regularization")
+
+    if cfg.experiment.get("use_dynamic_prompt", False):
+        common.append("--use_dynamic_prompt")
+    if cfg.experiment.get("use_selective_memory", False):
+        common.append("--use_selective_memory")
+    common.extend([
+        "--memory_focus", str(cfg.experiment.get("memory_focus", 10.0)),
+        "--num_null_units", str(cfg.experiment.get("num_null_units", 2)),
+        "--injection_strategy", cfg.experiment.get("injection_strategy", "prefix"),
+    ])
+    if cfg.experiment.get("use_bg_suppression", False):
+        common.append("--use_bg_suppression")
+
+    # --- Prototype classifier flags ---
+    if cfg.experiment.get("use_prototype_classifier", False):
+        common.append("--use_prototype_classifier")
+    if cfg.experiment.get("extract_prototypes", False):
+        common.append("--extract_prototypes")
+    common.extend([
+        "--prototypes_path", str(cfg.experiment.get("prototypes_path", "")),
+        "--prototype_temperature", str(cfg.experiment.get("prototype_temperature", 10.0)),
+        "--prototypes_out_path", str(cfg.experiment.get("prototypes_out_path", "")),
+        "--prototype_checkpoint_path", str(cfg.experiment.get("prototype_checkpoint_path", "")),
+        "--extract_batch_size", str(cfg.experiment.get("extract_batch_size", 4)),
+        "--extract_num_workers", str(cfg.experiment.get("extract_num_workers", 8)),
+        "--extract_max_samples_per_class", str(cfg.experiment.get("extract_max_samples_per_class", 0)),
+    ])
+
+    # --- Linear probe upper-bound diagnostic flags ---
+    if cfg.experiment.get("extract_features", False):
+        common.append("--extract_features")
+    if cfg.experiment.get("use_linear_probe", False):
+        common.append("--use_linear_probe")
+    common.extend([
+        "--feature_extraction_checkpoint_path", str(cfg.experiment.get("feature_extraction_checkpoint_path", "")),
+        "--features_out_path", str(cfg.experiment.get("features_out_path", "")),
+        "--linear_probe_path", str(cfg.experiment.get("linear_probe_path", "")),
+    ])
+
+    # --- Path B Phase 0 diagnostics (D1, D2) ---
+    if cfg.experiment.get("diagnostic_per_layer_separability", False):
+        common.append("--diagnostic_per_layer_separability")
+    if cfg.experiment.get("diagnostic_null_space_viability", False):
+        common.append("--diagnostic_null_space_viability")
+    d1_seed = cfg.experiment.get("d1_seed", None)
+    if d1_seed is not None:
+        common.extend(["--d1_seed", str(d1_seed)])
+    d2_attach = cfg.experiment.get("d2_attach", None)
+    if d2_attach is not None:
+        common.extend(["--d2_attach", str(d2_attach)])
+
+    # --- LoRA adapter flags (Path B Variant A v1) ---
+    if cfg.experiment.get("use_lora_adapter", False):
+        common.append("--use_lora_adapter")
+    common.extend([
+        "--lora_rank", str(cfg.experiment.get("lora_rank", 16)),
+        "--lora_attach", str(cfg.experiment.get("lora_attach", "fc1")),
+        "--lambda_olora", str(cfg.experiment.get("lambda_olora", 0.5)),
+        "--lora_lr_asymmetry_factor", str(cfg.experiment.get("lora_lr_asymmetry_factor", 2.0)),
+    ])
+    lora_alpha = cfg.experiment.get("lora_alpha", None)
+    if lora_alpha is not None:
+        common.extend(["--lora_alpha", str(lora_alpha)])
+
     # --- Correspondence embedding flags to the CLI call if they are true ---
     if cfg.experiment.get("use_correspondence_embedding", False):
         common.append("--use_correspondence_embedding")
@@ -82,6 +154,9 @@ def main(cfg: DictConfig):
             "--bg_thres",       str(cfg.experiment.bg_thres),
             "--bg_thres_topk",  str(cfg.experiment.bg_thres_topk),
             "--lambda_query",   str(cfg.experiment.lambda_query),
+            "--lambda_ortho_inter", str(cfg.experiment.lambda_ortho_inter),
+            "--lambda_ortho_intra", str(cfg.experiment.lambda_ortho_intra),
+            "--lambda_bg",          str(cfg.experiment.get("lambda_bg", 0.1)),
             "--resume",         str(cfg.experiment.resume),
         ]
     else:
@@ -93,19 +168,27 @@ def main(cfg: DictConfig):
             
         ]
 
-    torchrun = [
-        "python",
-        # "--nnodes",          str(cfg.sbatch.nodes),
-        # "--nproc_per_node",  str(cfg.sbatch.gpus_per_node),
-        "main.py",
-    ] + common + mode
+    nproc_per_node = int(cfg.sbatch.gpus_per_node)
+    extract_flag = cfg.experiment.get("extract_prototypes", False)
+
+    # Use torchrun for extraction DDP; plain python otherwise (training relies on
+    # Lightning's internal DDP spawn, which must NOT be wrapped in torchrun).
+    if extract_flag and nproc_per_node > 1:
+        cmd = [
+            "torchrun",
+            f"--nproc_per_node={nproc_per_node}",
+            "--standalone",
+            "main.py",
+        ] + common + mode
+    else:
+        cmd = ["python", "main.py"] + common + mode
 
     is_submitit_worker = os.environ.get("SUBMITIT_EXECUTOR") == "slurm"
 
     if is_submitit_worker or cfg.run.local:
         # we are on the compute node → launch the experiment
-        print(" ".join(shlex.quote(x) for x in torchrun))
-        subprocess.check_call(torchrun)
+        print(" ".join(shlex.quote(x) for x in cmd))
+        subprocess.check_call(cmd)
     else:
         # we are on the login / driver process
         print("[submitit] Job script generated and submitted to Slurm.")

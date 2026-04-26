@@ -1,0 +1,41 @@
+defaults:
+  - _base
+
+# D2 — null-space viability diagnostic for InfLoRA-style LoRA init.
+# See docs/MD-DETR/path_b_design.md §7 — decides Path B Axis B (rank) + C (separation).
+#
+# Uses a SINGLE fixed model state (final Task_4 checkpoint) for all measurements,
+# iterating each task's training data through it. Per-task activation-subspace
+# variation comes from the different data distributions — which is the right
+# methodology for InfLoRA feasibility (asks whether tasks' image distributions
+# produce distinct enough subspaces for null-space init to work). Using per-task
+# checkpoints instead would hit engine.resume()'s strict=False shape-mismatch
+# skip behavior and leave late tasks' memory at random-init.
+
+exp_name:        diagnostic_null_space_viability
+train:           0
+use_prompts:     1
+use_dynamic_prompt: true   # Required for DynamicPrompt checkpoints.
+
+diagnostic_null_space_viability: true
+
+batch_size:      16
+# epochs/save_epochs/eval_epochs are required by run.py's mode list (even in
+# eval-style configs — run.py always emits these CLI flags). _base.yaml does
+# not define them, so every eval-style config must set them inline. D2 runs
+# instead of train/eval (early-returns in main.py), so these values are never
+# actually consumed beyond being forwarded to argparse.
+epochs:          16
+save_epochs:     5
+eval_epochs:     2
+extract_batch_size: 16
+extract_num_workers: 8
+
+# D2 reuses the extract_max_samples_per_class flag with different semantics:
+# here it caps BATCHES per task (not samples per class). 300 batches × 16 img
+# × 300 proposals ≈ 1.4M activation vectors per task → stable 256x256 covariance.
+extract_max_samples_per_class: 300
+
+checkpoint_dir:      /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_dynamic_correctness_a/Task_1
+checkpoint_base:     checkpoint05.pth
+checkpoint_next:     checkpoint05.pth

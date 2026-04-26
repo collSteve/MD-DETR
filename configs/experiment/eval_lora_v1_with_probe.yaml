@@ -1,0 +1,39 @@
+defaults:
+  - _base
+
+# Path B Variant A v1 — eval config with linear-probe classifier swap.
+# See docs/MD-DETR/phase_1_conceptual_plan.md §2.7 + §5 Phase 1.6.
+#
+# Loads each task's LoRA-trained checkpoint, swaps class_embed for the trained
+# linear probe via engine.py's LinearProbeScorer dispatch, runs 4-task CL eval.
+# Reuses D3's linear-probe infrastructure verbatim (just pointed at the
+# LoRA-trained features instead of DP baseline features).
+
+exp_name:        eval_lora_v1_with_probe
+train:           0
+
+use_prompts:     1
+use_dynamic_prompt: true
+
+batch_size:      16
+epochs:          16
+save_epochs:     5
+eval_epochs:     2
+
+# LoRA — must be on so monkey-patching happens at trainer init; all 4 task slots
+# get loaded from the checkpoint.
+use_lora_adapter:              true
+lora_rank:                     16
+lora_attach:                   "fc1"
+lambda_olora:                  0.5
+lora_lr_asymmetry_factor:      2.0
+
+# Linear-probe swap for classifier (Axis E).
+use_linear_probe:    true
+linear_probe_path:   /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_linear_probe_lora_v1/linear_probe.pt
+
+# Points at the LoRA-trained per-task checkpoints produced by train_lora_v1.
+# Same per-task checkpoint-resolution pattern as validate_with_prompt_dyn_mem.yaml.
+checkpoint_dir:      /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_lora_v1/Task_1
+checkpoint_base:     checkpoint05.pth
+checkpoint_next:     checkpoint05.pth

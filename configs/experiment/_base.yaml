@@ -18,9 +18,12 @@ lr_old:              1e-5
 bg_thres:            0.65
 bg_thres_topk:       5
 lambda_query:        0.1
+lambda_ortho_inter:  0.0
+lambda_ortho_intra:  0.0
+use_ortho_regularization: false
 
 repo_name:           SenseTime/deformable-detr
-freeze:              backbone,encoder,decoder
+freeze:              backbone,encoder,decoder,
 new_params:          class_embed,prompts
 viz:                 --viz
 
@@ -48,3 +51,85 @@ dual_memory_switch_layer: 3
 # Defines the strategy for integrating the <Q-to-Ek> memory prompt.
 # Options: "query_bias", "output_bias", "masked_prefix", "pos_embed_prefix"
 q_to_ek_strategy: "query_bias"
+
+
+record_queries:  false
+
+# query_loss trains query_tf (nn.Linear 300*256 -> 300) to predict foreground proposals.
+# Only relevant for DynamicPrompt which collapses 300 proposals into one query via query_tf.
+# Per-proposal memories (SimpleProposalMemory, SelectiveProposalMemory) bypass query_tf —
+# they address memory directly with raw proposals. Disable for per-proposal memories.
+use_query_loss: true
+
+# --- INJECTION STRATEGY ---
+# How memory output is injected into decoder self-attention.
+# "prefix" = concatenate to K,V (300 prefix + 300 original = 600 tokens)
+# "additive_kv" = add directly to K,V (300 tokens, zero compute overhead)
+injection_strategy: "prefix"
+
+# --- EXTRACTION SUBSAMPLING ---
+# Cap matched-proposal samples per class during extraction. 0 = unlimited.
+# 500 gives full extraction in ~30-50 min on single GPU (vs ~8 hours unlimited).
+# Prototype quality is essentially unchanged — class means are stable after a few hundred samples.
+extract_max_samples_per_class: 0
+
+# --- DYNAMIC PROMPT MEMORY ---
+# Instantiate DynamicPrompt (25 units, e_p_length=plen). Required for loading
+# checkpoints trained with DynamicPrompt (train_dynamic_correctness_a/*).
+# Mutually exclusive with use_selective_memory.
+use_dynamic_prompt:    false
+
+# --- SELECTIVE MEMORY (ANTI-INTERFERENCE) ---
+use_selective_memory:  false
+memory_focus:          10.0
+num_null_units:        2
+use_bg_suppression:    false
+lambda_bg:             0.1
+
+# --- POST-HOC PROTOTYPE CLASSIFIER ---
+# Swap class_embed logits for cosine similarity to saved prototypes at eval.
+# Training is untouched; this is purely an evaluation-time diagnostic.
+use_prototype_classifier: false
+prototypes_path:          ""
+prototype_temperature:    10.0
+# Extraction-only flags (runs instead of train/eval)
+extract_prototypes:          false
+prototypes_out_path:         ""
+prototype_checkpoint_path:   ""
+# Throughput tuning for extraction (overrides batch_size / num_workers in extraction mode).
+# Default 4 is conservative for 24GB GPU using Python fallback for deformable attention.
+# If the custom CUDA kernel is loaded, batch=16 or higher is fine.
+extract_batch_size:          4
+extract_num_workers:         8
+
+# --- LINEAR PROBE UPPER-BOUND DIAGNOSTIC ---
+# Stage 1: extract raw per-proposal (feature, label) pairs (tools/extract_features.py)
+# Stage 2: train 80-way nn.Linear offline (tools/train_linear_probe.py)
+# Stage 3: swap class_embed at eval with the trained probe (engine.common_step)
+# Strongest linear scorer on hot decoder features; upper bound for any linear head.
+# See docs/MD-DETR/path_b_design.md §E for how this feeds Path B's classifier-head choice.
+extract_features:                    false
+feature_extraction_checkpoint_path:  ""   # explicit; falls back to checkpoint_dir-replace logic
+features_out_path:                   ""   # defaults to <out_dir>/features.pt
+use_linear_probe:                    false
+linear_probe_path:                   ""   # required when use_linear_probe is True
+
+# --- PATH B PRE-IMPLEMENTATION DIAGNOSTICS (D1, D2) ---
+# Diagnostic-only modes for Path B (LoRA / EASE-for-detection) design decisions.
+# See docs/MD-DETR/path_b_design.md §7 for purpose, expected outputs, and decision gates.
+# Each runs INSTEAD of training/eval/extraction (mutually exclusive with extract_prototypes,
+# extract_features, etc.) and writes a small summary table + raw .pt to <out_dir>.
+diagnostic_per_layer_separability:   false   # D1: decides Axis A (LoRA attach point)
+diagnostic_null_space_viability:     false   # D2: decides Axis B (rank) + Axis C (separation mechanism)
+d1_seed:                             null    # override for Pre-1b variance baseline (null → inherits args.seed)
+d2_attach:                           null    # override for Pre-1a fc2 measurement (null → original self_attn+fc1)
+
+# --- LORA ADAPTERS (PATH B VARIANT A v1) ---
+# Per-task LoRA wrappers on decoder FFN projections. See docs/MD-DETR/phase_1_conceptual_plan.md.
+# use_lora_adapter must be set true by training/eval configs that opt into Variant A.
+use_lora_adapter:              false
+lora_rank:                     16
+lora_alpha:                    null           # null → alpha = rank → scale 1 (standard PEFT)
+lora_attach:                   "fc1"          # options: "fc1", "fc2", "fc1_fc2"
+lambda_olora:                  0.5            # O-LoRA soft-orthogonality penalty weight
+lora_lr_asymmetry_factor:      2.0            # DP memory trained at lr/factor; LoRA at lr (§2.8 mitigation)

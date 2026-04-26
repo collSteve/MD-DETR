@@ -1,0 +1,43 @@
+defaults:
+  - _base
+
+exp_name:          validate_tier1_frozen_prototype
+train:             0
+
+# Tier 1 defining flag: no memory module (see extract_prototypes_tier1_frozen.yaml
+# for the full rationale).
+use_prompts:       0
+
+# Prototype classifier replaces class_embed at eval (engine.py:340-351).
+# Reads outputs.last_hidden_state, scores via cosine similarity to stored
+# per-class prototype means, concatenates the background column from the
+# original logits, then applies the standard mask_gradients unseen-class mask.
+use_prototype_classifier: true
+prototypes_path:          /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/extract_prototypes_tier1_frozen/prototypes.pt
+prototype_temperature:    10.0
+
+# checkpoint_dir points at the SYMLINK MIRROR so main.py:511's per-task
+# "checkpoint_dir.replace('Task_1', f'Task_{task_id}')" resolves to the SAME
+# Task-1 DynamicPrompt checkpoint for all 4 tasks (frozen baseline — no
+# continual training means no per-task checkpoints exist).
+#
+# The mirror is a one-time filesystem setup — not created by this config.
+# Create it on the cluster login node before submitting this job:
+#
+#   cd /ubc/cs/research/shield/projects/kren04/MD_DETR_runs
+#   mkdir -p tier1_dyn_frozen_ckpts
+#   for t in 1 2 3 4; do
+#       ln -s ../train_dynamic_correctness_a/Task_1 tier1_dyn_frozen_ckpts/Task_$t
+#   done
+checkpoint_dir:    /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/tier1_dyn_frozen_ckpts/Task_1
+checkpoint_base:   checkpoint05.pth
+checkpoint_next:   checkpoint05.pth
+
+# Hydra struct-mode requires these keys. _base.yaml doesn't set epochs/
+# save_epochs/eval_epochs; leaf validate configs each set their own. Values
+# match validate_with_no_prompt.yaml for consistency. In eval mode these
+# are used to construct pl.Trainer but don't influence eval behavior.
+batch_size:        16
+epochs:            16
+save_epochs:       5
+eval_epochs:       2

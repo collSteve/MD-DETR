@@ -773,6 +773,9 @@ class DeformableDetrMultiheadAttention(nn.Module):
         if self.use_correspondence_embedding:
             self.correspondence_embedding = nn.Embedding(config.num_queries, embed_dim)
 
+        # Injection strategy: "prefix" (concat to K,V) or "additive_kv" (add to K,V)
+        self.injection_strategy = getattr(config, 'injection_strategy', 'prefix')
+
     def _shape(self, tensor: torch.Tensor, seq_len: int, batch_size: int):
         return tensor.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
 
@@ -828,21 +831,23 @@ class DeformableDetrMultiheadAttention(nn.Module):
 
         value_states = self.v_proj(hidden_states_original)
 
-        # prefix tuning
-        if prompt_list is not None and prefix_tuning:
+        # Memory injection
+        if prompt_list is not None:
             pk, pv = prompt_list
-            
-            # --- Correspondence ---
-            if self.use_correspondence_embedding:
-                # Add the same learned correspondence embedding to the memory keys
-                pk = pk + self.correspondence_embedding(correspondence_indices).unsqueeze(0)
-            elif self.use_positional_embedding_for_correspondence:
-                # Add the query's positional embedding to its corresponding memory key (pk).
-                if position_embeddings is not None:
-                    pk = pk + position_embeddings
 
-            key_states = torch.cat((pk,key_states), dim=1)
-            value_states = torch.cat((pv,value_states), dim=1)
+            if self.injection_strategy == 'additive_kv':
+                # Additive: add memory output directly to key/value states
+                key_states = key_states + pk
+                value_states = value_states + pv
+            elif prefix_tuning:
+                # Prefix tuning: concatenate memory as prefix tokens (default)
+                if self.use_correspondence_embedding:
+                    pk = pk + self.correspondence_embedding(correspondence_indices).unsqueeze(0)
+                elif self.use_positional_embedding_for_correspondence:
+                    if position_embeddings is not None:
+                        pk = pk + position_embeddings
+                key_states = torch.cat((pk, key_states), dim=1)
+                value_states = torch.cat((pv, value_states), dim=1)
 
         # print(f"key_states: {key_states.size()}, value_states: {value_states.size()}")
 
@@ -1601,24 +1606,43 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         self.backbone = DeformableDetrConvModel(backbone, position_embeddings)
 
         if config.use_prompts:
-            # self.prompts = ExperimentPrompt(emb_d=config.d_model, n_tasks=config.n_tasks,                                                                                       │
-            #                         prompt_param=PromptParam(e_pool_size=config.num_prompts,                                                                                    │
-            #                                                 e_p_length=config.prompt_len),                                                                                      │
-            #                         #  prompt_param=[config.num_prompts,config.prompt_len,0],                                                                                   │
-            #                          key_dim=config.d_model, args=config)                                                                                                       │
-            # self.prompts = DynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=25,                                                                      │
-            #                              e_p_length=config.prompt_len, local_query=config.local_query)                                                                          │
-            # self.prompts = ClassWiseDynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=5,                                                              │
-            #                                         e_p_length=config.prompt_len, local_query=config.local_query)                                                               │
-            # self.prompts = TaskSpecificMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25,                                                                 │
-            #                              e_p_length=config.prompt_len, local_query=config.local_query)                                                                          │
-            # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25,                                                                │
-            #                                 e_p_length=config.prompt_len, local_query=config.local_query)                                                                       │
-            # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=20,                                                                │
-            #                                 e_p_length=2, local_query=config.local_query)                                                                                       │
-            # self.prompts = SimpleProposalMemory(emb_d = config.d_model, key_d = config.d_model, default_units=10,                                                               │
-            #                                 e_p_length=2, local_query=config.local_query)                                                                                       │
-            # self.prompts = FocusedProposalMemory(emb_d = config.d_model, key_d = config.d_model, default_units=10,                                                                │
+            # self.prompts = ExperimentPrompt(emb_d=config.d_model, n_tasks=config.n_tasks,
+            #                         prompt_param=PromptParam(e_pool_size=config.num_prompts,
+            #                                                 e_p_length=config.prompt_len),
+            #                         #  prompt_param=[config.num_prompts,config.prompt_len,0],
+            #                          key_dim=config.d_model, args=config)
+            # self.prompts = DynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=25,
+            #                              e_p_length=config.prompt_len, local_query=config.local_query)
+            # self.prompts = ClassWiseDynamicPrompt(emb_d = config.d_model, key_d = config.d_model, default_units=5,
+            #                                         e_p_length=config.prompt_len, local_query=config.local_query)
+            # self.prompts = TaskSpecificMemory(emb_d = config.d_model, key_d = config.d_model, default_units=25,
+            #                              e_p_length=config.prompt_len, local_query=config.local_query)
+            # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=20,
+            #                                 e_p_length=config.prompt_len, local_query=config.local_query)
+            # self.prompts = ProposalQueryMemory(emb_d = config.d_model, key_d = config.d_model, default_units=10,
+            #                                 e_p_length=2, local_query=config.local_query)
+            if getattr(config, 'use_selective_memory', False):
+                from models.memory.selective_proposal_memory import SelectiveProposalMemory
+                self.prompts = SelectiveProposalMemory(
+                    emb_d=config.d_model, key_d=config.d_model,
+                    default_units=10, e_p_length=2,
+                    local_query=config.local_query,
+                    focus=getattr(config, 'memory_focus', 10.0),
+                    num_null_units=getattr(config, 'num_null_units', 2),
+                )
+            elif getattr(config, 'use_dynamic_prompt', False):
+                # DynamicPrompt always uses 25 units and e_p_length=config.prompt_len (=10).
+                # These match the shapes saved in train_dynamic_correctness_a/* checkpoints.
+                # Do NOT change 25 — it's a user-specified invariant for DynamicPrompt to perform well.
+                self.prompts = DynamicPrompt(
+                    emb_d=config.d_model, key_d=config.d_model,
+                    default_units=25, e_p_length=config.prompt_len,
+                    local_query=config.local_query,
+                )
+            else:
+                self.prompts = SimpleProposalMemory(emb_d=config.d_model, key_d=config.d_model,
+                    default_units=10, e_p_length=2, local_query=config.local_query)
+            # self.prompts = FocusedProposalMemory(emb_d = config.d_model, key_d = config.d_model, default_units=10,
             #                                 e_p_length=2, local_query=config.local_query, focus=5.0)
 
             # self.prompts = FocusedDynamicPrompt(emb_d=config.d_model, key_d=config.d_model, default_units=25, 
@@ -1626,8 +1650,8 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
 
             # self.prompts = L2ProposalMemory(emb_d=config.d_model, key_d=config.d_model, default_units=10,
             #                                       e_p_length=2, local_query=config.local_query)
-            self.prompts = L2DynamicPrompt(emb_d=config.d_model, key_d=config.d_model, default_units=25, 
-                                               e_p_length=2, local_query=config.local_query)
+            # self.prompts = L2DynamicPrompt(emb_d=config.d_model, key_d=config.d_model, default_units=25, 
+            #                                    e_p_length=2, local_query=config.local_query)
 
         # Create input projection layers
         if config.num_feature_levels > 1:
@@ -1786,6 +1810,7 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         train=False,
         task_id=0,
         class_labels=None,
+        switch_off_prompts=False,
     ) -> Union[Tuple[torch.FloatTensor], DeformableDetrModelOutput]:
         r"""
         Returns:
@@ -1939,7 +1964,7 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
             init_reference_points = reference_points
 
         #import pdb; pdb.set_trace()
-        if self.config.use_prompts:
+        if self.config.use_prompts and not switch_off_prompts:
             prompts = self.prompts
         else:
             prompts = None
@@ -2098,6 +2123,7 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
         query = None,
         train = False,
         task_id = None,
+        switch_off_prompts=False,
     ) -> Union[Tuple[torch.FloatTensor], DeformableDetrObjectDetectionOutput]:
         r"""
         labels (`List[Dict]` of len `(batch_size,)`, *optional*):
@@ -2147,10 +2173,11 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
 
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        if labels is not None:
-            self.model.prompts.set_image_ids([label["image_id"] for label in labels])
-        else:
-            self.model.prompts.set_image_ids(None)
+        if hasattr(self.model, 'prompts') and self.model.prompts is not None: 
+            if labels is not None:
+                self.model.prompts.set_image_ids([label["image_id"] for label in labels])
+            else:
+                self.model.prompts.set_image_ids(None)
 
         # First, sent images through DETR base model to obtain encoder + decoder outputs
         outputs = self.model(
@@ -2167,6 +2194,7 @@ class DeformableDetrForObjectDetection(DeformableDetrPreTrainedModel):
             train=train,
             task_id=task_id,
             class_labels=None if labels is None else [label["class_labels"] for label in labels],
+            switch_off_prompts=switch_off_prompts,
         )
 
         #pdb.set_trace()

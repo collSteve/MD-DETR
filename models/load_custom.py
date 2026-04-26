@@ -13,21 +13,36 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """ Loading of Deformable DETR's CUDA kernels"""
-import os
 from pathlib import Path
+
+
+def _resolve_kernel_root() -> Path:
+    candidates = [
+        Path(__file__).resolve().parent.parent / "kernels" / "deformable_detr",
+        Path(__file__).resolve().parent.parent.parent / "kernels" / "deformable_detr",
+    ]
+    try:
+        import transformers
+        candidates.append(Path(transformers.__file__).resolve().parent / "kernels" / "deta")
+    except ImportError:
+        pass
+
+    for c in candidates:
+        if (c / "vision.cpp").exists():
+            return c
+    raise FileNotFoundError(
+        f"Deformable attention kernel sources not found. Tried: {[str(c) for c in candidates]}"
+    )
 
 
 def load_cuda_kernels():
     from torch.utils.cpp_extension import load
 
-    root = Path(__file__).resolve().parent.parent.parent / "kernels" / "deformable_detr"
+    root = _resolve_kernel_root()
     src_files = [
-        root / filename
-        for filename in [
-            "vision.cpp",
-            os.path.join("cpu", "ms_deform_attn_cpu.cpp"),
-            os.path.join("cuda", "ms_deform_attn_cuda.cu"),
-        ]
+        root / "vision.cpp",
+        root / "cpu" / "ms_deform_attn_cpu.cpp",
+        root / "cuda" / "ms_deform_attn_cuda.cu",
     ]
 
     load(

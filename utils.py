@@ -1,4 +1,6 @@
 import os
+import yaml
+import socket
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import subprocess
@@ -51,9 +53,17 @@ def print_final(out_dir, start_task=1, n_tasks=4):
 		outputs.append('------------------------------------------------------------------------------- \n')
 		outputs.append('Evaluating Task '+str(i)+'\n')
 		outputs.append('------------------------------------------------------------------------------- \n\n')
-		stats = open(out_dir+'/Task_'+str(i)+'/stats.txt').readlines()
-		outputs.extend(stats)
-	
+		# Tolerate missing stats.txt — can happen when epochs < eval_epochs
+		# (Lightning never fires validation, no stats written) or if training
+		# crashed before eval. Preserve the header so reviewers see which
+		# tasks are missing; skip the body rather than raising.
+		stats_path = out_dir+'/Task_'+str(i)+'/stats.txt'
+		try:
+			stats = open(stats_path).readlines()
+			outputs.extend(stats)
+		except FileNotFoundError:
+			outputs.append(f'[print_final] WARNING: {stats_path} not found — skipping.\n')
+
 	with open(out_dir+'/final_stats.txt', 'w') as f:
 		f.writelines(outputs)
 	f.close()
@@ -316,3 +326,205 @@ class MetricLogger(object):
 		total_time_str = str(datetime.timedelta(seconds=int(total_time)))
 		print('{} Total time: {} ({:.4f} s / it)'.format(
 			header, total_time_str, total_time / len(iterable)))
+
+
+def compute_memory_orthogonality_loss(prompts, task_id, device):
+	"""
+	Compute orthogonality regularization loss for memory keys.
+
+	Implements Approach 3: Inter-task + Intra-task orthogonality.
+	- Inter-task: Forces K vectors from different tasks to be orthogonal
+	- Intra-task: Forces K vectors within current task to be orthogonal
+
+	Args:
+		prompts: Memory module (DynamicPrompt or subclass like SimpleProposalMemory)
+		task_id: Current task ID (int)
+		device: torch.device for creating identity matrices
+
+	Returns:
+		tuple: (loss_inter, loss_intra)
+			- loss_inter: Inter-task orthogonality loss (scalar tensor)
+			- loss_intra: Intra-task orthogonality loss (scalar tensor)
+	"""
+	import torch.nn.functional as F
+
+	loss_ortho_inter = torch.tensor(0.0, device=device)
+	loss_ortho_intra = torch.tensor(0.0, device=device)
+
+	# Check if prompts has layer_memories attribute
+	if not hasattr(prompts, 'layer_memories'):
+		return loss_ortho_inter, loss_ortho_intra
+
+	for layer_name, task_dict in prompts.layer_memories.items():
+		K_current_list = []
+		K_old_list = []
+
+		for tid, mem in task_dict.items():
+			_, K, _ = mem.forward()  # (U_task, 256)
+
+			if tid == str(task_id):
+				K_current_list.append(K)
+			else:
+				# CRITICAL: Detach old memories to prevent gradient flow to frozen tasks
+				K_old_list.append(K.detach())
+
+		# Only need current task data to compute losses
+		if K_current_list:
+			K_current = torch.cat(K_current_list, dim=0)  # (U_current, 256)
+			K_current_norm = F.normalize(K_current, dim=1)
+
+			# Intra-task orthogonality: Always compute for current task
+			# Encourages diversity among memory units within the task
+			n = len(K_current)
+			self_gram = K_current_norm @ K_current_norm.T  # (U_current, U_current)
+			identity = torch.eye(n, device=device)
+			loss_ortho_intra = loss_ortho_intra + (self_gram - identity).pow(2).sum()
+
+			# Inter-task orthogonality: Only compute when old tasks exist
+			# Prevents interference between current and previous task memories
+			if K_old_list:
+				K_old = torch.cat(K_old_list, dim=0)  # (U_old, 256)
+				K_old_norm = F.normalize(K_old, dim=1)
+				cross_gram = K_current_norm @ K_old_norm.T  # (U_current, U_old)
+				loss_ortho_inter = loss_ortho_inter + cross_gram.pow(2).sum()
+
+	return loss_ortho_inter, loss_ortho_intra
+
+
+def save_experiment_config(args, out_dir, engine_name):
+    """Save full experiment configuration to YAML and print a summary.
+
+    Creates 'experiment_config.yaml' in out_dir with structured key parameters
+    for quick reference and full reproducibility.
+    """
+    # Mirror the memory-dispatch order in models/modeling_deformable_detr.py:~1624:
+    #   SelectiveProposalMemory → DynamicPrompt → SimpleProposalMemory fallback.
+    # Previously this branch only considered selective vs simple, so a DP-memory
+    # run logged 'SimpleProposalMemory' (misleading; the actual model was DP).
+    if getattr(args, 'use_selective_memory', False):
+        memory_type = 'SelectiveProposalMemory'
+    elif getattr(args, 'use_dynamic_prompt', False):
+        memory_type = 'DynamicPrompt'
+    else:
+        memory_type = 'SimpleProposalMemory'
+
+    config = {
+        'experiment': {
+            'timestamp': datetime.datetime.now().isoformat(),
+            'engine': engine_name,
+            'hostname': socket.gethostname(),
+        },
+        'memory': {
+            'type': memory_type,
+            'injection_strategy': getattr(args, 'injection_strategy', 'prefix'),
+            'memory_focus': getattr(args, 'memory_focus', 10.0),
+            'num_null_units': getattr(args, 'num_null_units', 2),
+            'use_prompts': args.use_prompts,
+            'local_query': args.local_query,
+        },
+        'losses': {
+            'use_bg_suppression': getattr(args, 'use_bg_suppression', False),
+            'lambda_bg': getattr(args, 'lambda_bg', 0.1),
+            'use_ortho_regularization': getattr(args, 'use_ortho_regularization', False),
+            'lambda_ortho_inter': args.lambda_ortho_inter,
+            'lambda_ortho_intra': args.lambda_ortho_intra,
+            'use_query_loss': getattr(args, 'use_query_loss', False),
+            'lambda_query': args.lambda_query,
+            'cls_loss_coef': args.cls_loss_coef,
+            'bbox_loss_coef': args.bbox_loss_coef,
+            'giou_loss_coef': args.giou_loss_coef,
+            'focal_alpha': args.focal_alpha,
+            'set_cost_class': args.set_cost_class,
+            'set_cost_bbox': args.set_cost_bbox,
+            'set_cost_giou': args.set_cost_giou,
+        },
+        'training': {
+            'lr': args.lr,
+            'lr_old': args.lr_old,
+            'weight_decay': args.weight_decay,
+            'clip_max_norm': args.clip_max_norm,
+            'epochs': args.epochs,
+            'batch_size': args.batch_size,
+            'save_epochs': args.save_epochs,
+            'eval_epochs': args.eval_epochs,
+            'freeze': args.freeze,
+            'new_params': args.new_params,
+            'seed': args.seed,
+            'resume': args.resume,
+            'n_gpus': args.n_gpus,
+        },
+        'continual': {
+            'n_tasks': args.n_tasks,
+            'start_task': args.start_task,
+            'n_classes': args.n_classes,
+            'split_point': args.split_point,
+            'task_order': getattr(args, 'task_order', None),
+            'bg_thres': args.bg_thres,
+            'bg_thres_topk': args.bg_thres_topk,
+            'mask_gradients': args.mask_gradients,
+        },
+        'other_features': {
+            'use_correspondence_embedding': getattr(args, 'use_correspondence_embedding', False),
+            'use_positional_embedding_for_correspondence': getattr(args, 'use_positional_embedding_for_correspondence', False),
+            'use_dual_memory_model': getattr(args, 'use_dual_memory_model', False),
+            'dual_memory_strategy': getattr(args, 'dual_memory_strategy', 'hybrid_everywhere'),
+            'q_to_ek_strategy': getattr(args, 'q_to_ek_strategy', 'query_bias'),
+        },
+        'prototypes': {
+            'use_prototype_classifier': getattr(args, 'use_prototype_classifier', False),
+            'prototypes_path': getattr(args, 'prototypes_path', ''),
+            'prototype_temperature': getattr(args, 'prototype_temperature', 10.0),
+            'extract_prototypes': getattr(args, 'extract_prototypes', False),
+            'prototypes_out_path': getattr(args, 'prototypes_out_path', ''),
+            'prototype_checkpoint_path': getattr(args, 'prototype_checkpoint_path', ''),
+            'extract_batch_size': getattr(args, 'extract_batch_size', 4),
+            'extract_num_workers': getattr(args, 'extract_num_workers', 8),
+            'extract_max_samples_per_class': getattr(args, 'extract_max_samples_per_class', 0),
+        },
+        'linear_probe': {
+            'extract_features': getattr(args, 'extract_features', False),
+            'feature_extraction_checkpoint_path': getattr(args, 'feature_extraction_checkpoint_path', ''),
+            'features_out_path': getattr(args, 'features_out_path', ''),
+            'use_linear_probe': getattr(args, 'use_linear_probe', False),
+            'linear_probe_path': getattr(args, 'linear_probe_path', ''),
+        },
+        'paths': {
+            'output_dir': args.output_dir,
+            'repo_name': args.repo_name,
+            'checkpoint_dir': args.checkpoint_dir,
+            'checkpoint_base': args.checkpoint_base,
+            'checkpoint_next': args.checkpoint_next,
+            'train_img_dir': args.train_img_dir,
+            'test_img_dir': args.test_img_dir,
+            'task_ann_dir': args.task_ann_dir,
+        },
+    }
+
+    os.makedirs(out_dir, exist_ok=True)
+    config_path = os.path.join(out_dir, 'experiment_config.yaml')
+    with open(config_path, 'w') as f:
+        f.write(f"# Experiment configuration — {engine_name}\n")
+        f.write(f"# Generated: {config['experiment']['timestamp']}\n\n")
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+    m = config['memory']
+    lo = config['losses']
+    t = config['training']
+    print("=" * 60)
+    print("EXPERIMENT CONFIGURATION")
+    print("=" * 60)
+    print(f"  Engine:           {engine_name}")
+    print(f"  Memory:           {m['type']}")
+    print(f"  Injection:        {m['injection_strategy']}")
+    print(f"  Focus:            {m['memory_focus']}")
+    print(f"  Null units:       {m['num_null_units']}")
+    print(f"  BG suppression:   {lo['use_bg_suppression']} (lambda={lo['lambda_bg']})")
+    print(f"  Ortho:            {lo['use_ortho_regularization']} (inter={lo['lambda_ortho_inter']}, intra={lo['lambda_ortho_intra']})")
+    print(f"  Query loss:       {lo['use_query_loss']} (lambda={lo['lambda_query']})")
+    print(f"  Freeze:           {t['freeze']}")
+    print(f"  LR:               {t['lr']} / LR_old: {t['lr_old']}")
+    print(f"  Epochs:           {t['epochs']} / Batch: {t['batch_size']}")
+    p = config['prototypes']
+    print(f"  Prototypes:       extract={p['extract_prototypes']}  use={p['use_prototype_classifier']}  T={p['prototype_temperature']}")
+    print(f"  Config saved to:  {config_path}")
+    print("=" * 60)

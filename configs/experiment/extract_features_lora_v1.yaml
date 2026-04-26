@@ -1,0 +1,34 @@
+defaults:
+  - _base
+
+# Gate C step 1 — extract hot decoder features from the LoRA-trained Task-4
+# checkpoint so a linear probe can be trained on them.
+# Reuses D3's tools/extract_features.py verbatim. See phase_1_conceptual_plan.md §5 Phase 1.6.
+
+exp_name:        extract_features_lora_v1
+train:           0
+
+use_prompts:     1
+use_dynamic_prompt: true
+
+# LoRA must be on so the extraction forward uses the LoRA-trained projections.
+use_lora_adapter:              true
+lora_rank:                     16
+lora_attach:                   "fc1"
+lambda_olora:                  0.5
+lora_lr_asymmetry_factor:      2.0
+
+extract_features: true
+
+batch_size:      16
+epochs:          16
+save_epochs:     5
+eval_epochs:     2
+
+extract_batch_size: 16
+extract_num_workers: 8
+extract_max_samples_per_class: 2000    # matches D3's cap for comparable file size
+
+checkpoint_dir:      /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_lora_v1/Task_1
+checkpoint_base:     checkpoint05.pth
+checkpoint_next:     checkpoint05.pth

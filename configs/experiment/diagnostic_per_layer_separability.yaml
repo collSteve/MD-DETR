@@ -1,0 +1,40 @@
+defaults:
+  - _base
+
+# D1 — per-layer class separability diagnostic.
+# See docs/MD-DETR/path_b_design.md §7 — decides Path B Axis A (LoRA attach point).
+#
+# Inherits validate-DP setup (use_dynamic_prompt, 25 memory units) so the forward
+# path matches how the DP baseline's features were produced. Replaces train/eval
+# with the D1 dispatch in main.py.
+
+exp_name:        diagnostic_per_layer_separability
+train:           0
+use_prompts:     1
+use_dynamic_prompt: true   # Required for the DynamicPrompt checkpoint we measure against.
+
+# Geometry diagnostic — measures features of the FINAL Task-4 trained model. No
+# continual-eval loop needed; main.py's D1 branch handles the full iteration.
+diagnostic_per_layer_separability: true
+
+batch_size:      16
+# epochs/save_epochs/eval_epochs are required by run.py's mode list (even in
+# eval-style configs — run.py always emits these CLI flags). _base.yaml does
+# not define them, so every eval-style config must set them inline. D1 runs
+# instead of train/eval (early-returns in main.py), so these values are never
+# actually consumed beyond being forwarded to argparse.
+epochs:          16
+save_epochs:     5
+eval_epochs:     2
+extract_batch_size: 16
+extract_num_workers: 8
+
+# D1 caps per-class samples at 500 by default (inside the tool) — fast, class
+# means converge well before 500. Override here if you want unlimited.
+extract_max_samples_per_class: 500
+
+# Target: train_dynamic_correctness_a (the real baseline).
+# Override at sbatch submission if you want to diagnose a different checkpoint.
+checkpoint_dir:      /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_dynamic_correctness_a/Task_1
+checkpoint_base:     checkpoint05.pth
+checkpoint_next:     checkpoint05.pth

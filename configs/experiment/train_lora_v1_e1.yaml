@@ -1,0 +1,39 @@
+defaults:
+  - _base
+
+# Path B Variant A v1 — E1 ablation (LoRA replaces DP memory, no coexistence).
+# See phase_1_implementation_plan.md §1.8 ablation #1.
+#
+# Motivation (April 22 2026): Phase 1.4 showed Variant A v1 under E2 (use_prompts=1,
+# DP memory active) catastrophically regressed vs DP baseline (T4 C = 15% vs 36%,
+# T4 P = 2% vs 32% @ IoU=0.50:0.95). Interpretation: LoRA and DP memory compete
+# for the per-task adaptation gradient, and LoRA's additive contribution across
+# tasks drifts features progressively. E1 removes DP memory entirely so LoRA is
+# the sole per-task adaptation mechanism. This is also the closest analog to
+# EASE's published regime (pre-trained backbone + per-task LoRA + prototype/probe).
+
+exp_name:        train_lora_v1_e1
+train:           1
+
+# E1 regime: NO memory module active.
+use_prompts:     0
+use_dynamic_prompt: false
+
+# Training schedule matches train_lora_v1 for direct comparison.
+batch_size:      1
+epochs:          6
+save_epochs:     5
+eval_epochs:     2
+
+# LoRA adapter config — same as v1 E2.
+use_lora_adapter:              true
+lora_rank:                     16
+lora_attach:                   "fc1"
+lambda_olora:                  0.5
+lora_lr_asymmetry_factor:      2.0           # Has no effect under E1 (no DP memory
+                                              # params to apply the reduced LR to);
+                                              # kept at 2.0 for config symmetry.
+
+checkpoint_dir:      /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_lora_v1_e1/Task_1
+checkpoint_base:     checkpoint05.pth
+checkpoint_next:     checkpoint05.pth

@@ -1,0 +1,6 @@
+
+defaults:
+  - train_with_prompt
+
+exp_name:        train_with_frozen_query_fn
+freeze:          backbone,encoder,decoder,input_proj,level_embed,query_position_embeddings,reference_points

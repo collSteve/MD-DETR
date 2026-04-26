@@ -1,0 +1,31 @@
+defaults:
+  - _base
+
+# Pre-1a — D2 measurement at decoder FFN fc2 (down-projection) input.
+# Complements the original D2 (which only measured self_attn + fc1 inputs).
+# See docs/MD-DETR/phase_1_conceptual_plan.md §3.1.
+#
+# Informs the fc1 vs fc1_fc2 attach-point ablation priority: if fc2 null-space
+# is comparable to fc1's, fc1_fc2 is a strong ablation candidate.
+
+exp_name:        diagnostic_null_space_fc2
+train:           0
+
+use_prompts:     1
+use_dynamic_prompt: true
+
+diagnostic_null_space_viability: true
+d2_attach:                       "fc2"
+
+batch_size:      16
+epochs:          16
+save_epochs:     5
+eval_epochs:     2
+
+extract_batch_size: 16
+extract_num_workers: 8
+extract_max_samples_per_class: 300
+
+checkpoint_dir:      /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_dynamic_correctness_a/Task_1
+checkpoint_base:     checkpoint05.pth
+checkpoint_next:     checkpoint05.pth

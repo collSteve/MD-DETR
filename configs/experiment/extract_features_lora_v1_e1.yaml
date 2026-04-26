@@ -1,0 +1,32 @@
+defaults:
+  - _base
+
+# Feature extraction for E1 ablation — mirrors extract_features_lora_v1.yaml
+# but with use_prompts=0 and checkpoint pointing at the E1-trained model.
+
+exp_name:        extract_features_lora_v1_e1
+train:           0
+
+use_prompts:     0
+use_dynamic_prompt: false
+
+use_lora_adapter:              true
+lora_rank:                     16
+lora_attach:                   "fc1"
+lambda_olora:                  0.5
+lora_lr_asymmetry_factor:      2.0
+
+extract_features: true
+
+batch_size:      16
+epochs:          16
+save_epochs:     5
+eval_epochs:     2
+
+extract_batch_size: 16
+extract_num_workers: 8
+extract_max_samples_per_class: 2000
+
+checkpoint_dir:      /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_lora_v1_e1/Task_1
+checkpoint_base:     checkpoint05.pth
+checkpoint_next:     checkpoint05.pth

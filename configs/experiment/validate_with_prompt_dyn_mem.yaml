@@ -5,6 +5,7 @@ exp_name:        validate_with_prompt_dyn_mem_debug_mode_with_img_id
 train:           0
 
 use_prompts:     1
+use_dynamic_prompt: true    # required to load DynamicPrompt checkpoints (25 units, e_p_length=10)
 
 batch_size:      1
 epochs:          16
