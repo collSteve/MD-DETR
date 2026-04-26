@@ -1,0 +1,30 @@
+defaults:
+  - _base
+
+# E1 ablation — eval with linear-probe classifier swap.
+# Mirrors eval_lora_v1_with_probe.yaml but with use_prompts=0 and paths
+# pointing at the E1-trained model + E1 probe.
+
+exp_name:        eval_lora_v1_e1_with_probe
+train:           0
+
+use_prompts:     0
+use_dynamic_prompt: false
+
+batch_size:      16
+epochs:          16
+save_epochs:     5
+eval_epochs:     2
+
+use_lora_adapter:              true
+lora_rank:                     16
+lora_attach:                   "fc1"
+lambda_olora:                  0.5
+lora_lr_asymmetry_factor:      2.0
+
+use_linear_probe:    true
+linear_probe_path:   /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_linear_probe_lora_v1_e1/linear_probe.pt
+
+checkpoint_dir:      /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_lora_v1_e1/Task_1
+checkpoint_base:     checkpoint05.pth
+checkpoint_next:     checkpoint05.pth

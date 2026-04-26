@@ -1630,6 +1630,15 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
                     focus=getattr(config, 'memory_focus', 10.0),
                     num_null_units=getattr(config, 'num_null_units', 2),
                 )
+            elif getattr(config, 'use_dynamic_prompt', False):
+                # DynamicPrompt always uses 25 units and e_p_length=config.prompt_len (=10).
+                # These match the shapes saved in train_dynamic_correctness_a/* checkpoints.
+                # Do NOT change 25 — it's a user-specified invariant for DynamicPrompt to perform well.
+                self.prompts = DynamicPrompt(
+                    emb_d=config.d_model, key_d=config.d_model,
+                    default_units=25, e_p_length=config.prompt_len,
+                    local_query=config.local_query,
+                )
             else:
                 self.prompts = SimpleProposalMemory(emb_d=config.d_model, key_d=config.d_model,
                     default_units=10, e_p_length=2, local_query=config.local_query)

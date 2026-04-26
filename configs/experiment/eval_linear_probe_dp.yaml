@@ -1,0 +1,28 @@
+defaults:
+  - _base
+
+exp_name:        eval_linear_probe_dp
+train:           0
+
+# DynamicPrompt memory active at eval — same protocol as DP native and DP prototype.
+# use_dynamic_prompt=true is required to instantiate the 25-unit DynamicPrompt
+# memory so the Task_N checkpoints load correctly (see code gotchas).
+use_prompts:       1
+use_dynamic_prompt: true
+
+# Stage 3 of the linear probe diagnostic: swap class_embed with the trained
+# linear probe at eval. Mutually exclusive with use_prototype_classifier.
+use_linear_probe:  true
+linear_probe_path: /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_linear_probe_dp/linear_probe.pt
+
+# Standard DP per-task-checkpoint protocol: main.py's task loop resolves
+# checkpoint_dir.replace('Task_1', f'Task_{task_id}'), so T1 eval loads Task_1,
+# T2 eval loads Task_2, etc. Matches the parallel session's DP prototype eval.
+checkpoint_dir:    /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_dynamic_correctness_a/Task_1
+checkpoint_base:   checkpoint05.pth
+checkpoint_next:   checkpoint05.pth
+
+batch_size:        16
+epochs:            16
+save_epochs:       5
+eval_epochs:       2

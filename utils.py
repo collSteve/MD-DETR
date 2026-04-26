@@ -53,9 +53,17 @@ def print_final(out_dir, start_task=1, n_tasks=4):
 		outputs.append('------------------------------------------------------------------------------- \n')
 		outputs.append('Evaluating Task '+str(i)+'\n')
 		outputs.append('------------------------------------------------------------------------------- \n\n')
-		stats = open(out_dir+'/Task_'+str(i)+'/stats.txt').readlines()
-		outputs.extend(stats)
-	
+		# Tolerate missing stats.txt — can happen when epochs < eval_epochs
+		# (Lightning never fires validation, no stats written) or if training
+		# crashed before eval. Preserve the header so reviewers see which
+		# tasks are missing; skip the body rather than raising.
+		stats_path = out_dir+'/Task_'+str(i)+'/stats.txt'
+		try:
+			stats = open(stats_path).readlines()
+			outputs.extend(stats)
+		except FileNotFoundError:
+			outputs.append(f'[print_final] WARNING: {stats_path} not found — skipping.\n')
+
 	with open(out_dir+'/final_stats.txt', 'w') as f:
 		f.writelines(outputs)
 	f.close()
@@ -389,7 +397,16 @@ def save_experiment_config(args, out_dir, engine_name):
     Creates 'experiment_config.yaml' in out_dir with structured key parameters
     for quick reference and full reproducibility.
     """
-    memory_type = 'SelectiveProposalMemory' if getattr(args, 'use_selective_memory', False) else 'SimpleProposalMemory'
+    # Mirror the memory-dispatch order in models/modeling_deformable_detr.py:~1624:
+    #   SelectiveProposalMemory → DynamicPrompt → SimpleProposalMemory fallback.
+    # Previously this branch only considered selective vs simple, so a DP-memory
+    # run logged 'SimpleProposalMemory' (misleading; the actual model was DP).
+    if getattr(args, 'use_selective_memory', False):
+        memory_type = 'SelectiveProposalMemory'
+    elif getattr(args, 'use_dynamic_prompt', False):
+        memory_type = 'DynamicPrompt'
+    else:
+        memory_type = 'SimpleProposalMemory'
 
     config = {
         'experiment': {
@@ -460,6 +477,16 @@ def save_experiment_config(args, out_dir, engine_name):
             'extract_prototypes': getattr(args, 'extract_prototypes', False),
             'prototypes_out_path': getattr(args, 'prototypes_out_path', ''),
             'prototype_checkpoint_path': getattr(args, 'prototype_checkpoint_path', ''),
+            'extract_batch_size': getattr(args, 'extract_batch_size', 4),
+            'extract_num_workers': getattr(args, 'extract_num_workers', 8),
+            'extract_max_samples_per_class': getattr(args, 'extract_max_samples_per_class', 0),
+        },
+        'linear_probe': {
+            'extract_features': getattr(args, 'extract_features', False),
+            'feature_extraction_checkpoint_path': getattr(args, 'feature_extraction_checkpoint_path', ''),
+            'features_out_path': getattr(args, 'features_out_path', ''),
+            'use_linear_probe': getattr(args, 'use_linear_probe', False),
+            'linear_probe_path': getattr(args, 'linear_probe_path', ''),
         },
         'paths': {
             'output_dir': args.output_dir,

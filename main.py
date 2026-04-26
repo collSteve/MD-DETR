@@ -243,6 +243,14 @@ def get_args_parser():
     parser.add_argument('--q_to_ek_strategy', type=str, default='query_bias',
                         help="Strategy for the Q-to-Ek memory module.")
 
+    # DynamicPrompt memory (25 units, e_p_length=prompt_len). Required for loading checkpoints
+    # trained with DynamicPrompt (e.g. train_dynamic_correctness_a/*). Mutually exclusive with
+    # --use_selective_memory.
+    parser.add_argument('--use_dynamic_prompt', action='store_true',
+                        help='Instantiate DynamicPrompt (25 memory units per task). Required to '
+                             'correctly load DynamicPrompt checkpoints; otherwise SimpleProposalMemory '
+                             'is used and shapes silently mismatch.')
+
     # Selective memory (anti-interference)
     parser.add_argument('--use_selective_memory', action='store_true',
                         help='Use SelectiveProposalMemory instead of SimpleProposalMemory')
@@ -272,6 +280,64 @@ def get_args_parser():
                         help='Output path for extracted prototypes (default: {output_dir}/prototypes.pt).')
     parser.add_argument('--prototype_checkpoint_path', default='', type=str,
                         help='Explicit checkpoint to load for extraction. Default: {checkpoint_dir replaced to Task_{n_tasks}}/{checkpoint_next}.')
+    parser.add_argument('--extract_max_samples_per_class', default=0, type=int,
+                        help='Cap matched-proposal samples per class. 0 = unlimited (default). '
+                             'Set e.g. 500 to stop collecting for a class once it reaches the cap. '
+                             'Cuts extraction wall-clock by 5-10x with ~no loss in prototype quality.')
+    parser.add_argument('--extract_batch_size', default=4, type=int,
+                        help='Batch size for prototype extraction (overrides --batch_size in extraction mode). '
+                             'Conservative default for 24GB GPU with Python fallback for deformable attention.')
+    parser.add_argument('--extract_num_workers', default=8, type=int,
+                        help='DataLoader workers for prototype extraction (overrides --num_workers in extraction mode).')
+
+    # --- LINEAR PROBE UPPER-BOUND DIAGNOSTIC ---
+    # Stages 1+3 tie in here; stage 2 (training) is a separate standalone script.
+    parser.add_argument('--extract_features', action='store_true',
+                        help='Run raw feature extraction instead of train/eval. Produces features.pt '
+                             'with per-proposal (feature, label) pairs for offline linear-probe training.')
+    parser.add_argument('--feature_extraction_checkpoint_path', default='', type=str,
+                        help='Explicit checkpoint to load for feature extraction. '
+                             'Default: {checkpoint_dir replaced to Task_{n_tasks}}/{checkpoint_next}.')
+    parser.add_argument('--features_out_path', default='', type=str,
+                        help='Output path for extracted features (default: {output_dir}/features.pt).')
+    parser.add_argument('--use_linear_probe', action='store_true',
+                        help='At eval, replace class_embed logits with trained-linear-probe logits. '
+                             'Mutually exclusive with --use_prototype_classifier.')
+    parser.add_argument('--linear_probe_path', default='', type=str,
+                        help='Path to linear_probe.pt (required when --use_linear_probe is True).')
+
+    # --- PATH B PRE-IMPLEMENTATION DIAGNOSTICS (D1, D2) ---
+    # Run instead of train/eval. See docs/MD-DETR/path_b_design.md §7.
+    parser.add_argument('--diagnostic_per_layer_separability', action='store_true',
+                        help='D1: per-layer class separability of decoder hidden states. '
+                             'Decides Path B Axis A (LoRA attach point).')
+    parser.add_argument('--diagnostic_null_space_viability', action='store_true',
+                        help='D2: per-attach-point activation-subspace null-space viability for '
+                             'InfLoRA-style structural orthogonality init. Decides Path B Axes B + C.')
+    parser.add_argument('--d1_seed', default=None, type=int,
+                        help='Override seed for D1 runs (used by Pre-1b variance baseline — '
+                             'run D1 twice with different --d1_seed values to measure Gate B '
+                             'tolerance). None → inherits args.seed.')
+    parser.add_argument('--d2_attach', default=None, type=str,
+                        choices=['self_attn_fc1', 'fc2', 'fc1_fc2', 'self_attn', 'fc1'],
+                        help='D2 attach-point family: default None → self_attn + fc1 (original). '
+                             '"fc2" → Pre-1a measurement on FFN down-projection input. '
+                             '"fc1_fc2" → both up- and down-projections.')
+
+    # --- LORA ADAPTERS (PATH B VARIANT A v1) ---
+    # See docs/MD-DETR/phase_1_conceptual_plan.md for v1 spec.
+    parser.add_argument('--use_lora_adapter', action='store_true',
+                        help='Enable per-task LoRA adapters on decoder FFN (Variant A v1).')
+    parser.add_argument('--lora_rank', default=16, type=int,
+                        help='LoRA rank r. v1 default 16.')
+    parser.add_argument('--lora_alpha', default=None, type=float,
+                        help='LoRA alpha (scaling = alpha/rank). Default None → alpha = rank.')
+    parser.add_argument('--lora_attach', default='fc1', type=str, choices=['fc1', 'fc2', 'fc1_fc2'],
+                        help='Which decoder FFN projection(s) LoRA wraps. v1 default fc1.')
+    parser.add_argument('--lambda_olora', default=0.5, type=float,
+                        help='O-LoRA soft-orthogonality loss weight.')
+    parser.add_argument('--lora_lr_asymmetry_factor', default=2.0, type=float,
+                        help='DP memory trained at lr / factor (LoRA stays at lr). v1 default 2.0.')
 
     return parser
 
@@ -316,7 +382,7 @@ def validate_ortho_config(args):
         print()
 
 def validate_prototype_config(args):
-    """Validate prototype classifier flags are self-consistent."""
+    """Validate prototype classifier + linear probe flags are self-consistent."""
     if args.use_prototype_classifier and not args.prototypes_path:
         raise ValueError("--use_prototype_classifier requires --prototypes_path to be set.")
     if args.extract_prototypes and args.use_prototype_classifier:
@@ -324,6 +390,39 @@ def validate_prototype_config(args):
     if args.use_prototype_classifier and not args.eval:
         print("WARNING: --use_prototype_classifier is set but --eval is not; "
               "the prototype classifier only takes effect in the eval path.")
+    # Linear probe flags
+    if getattr(args, 'use_linear_probe', False) and not getattr(args, 'linear_probe_path', ''):
+        raise ValueError("--use_linear_probe requires --linear_probe_path to be set.")
+    if getattr(args, 'use_linear_probe', False) and args.use_prototype_classifier:
+        raise ValueError("Cannot set both --use_linear_probe and --use_prototype_classifier.")
+    if getattr(args, 'extract_features', False) and getattr(args, 'extract_prototypes', False):
+        raise ValueError("Cannot set both --extract_features and --extract_prototypes.")
+    if getattr(args, 'use_linear_probe', False) and not args.eval:
+        print("WARNING: --use_linear_probe is set but --eval is not; "
+              "the linear probe only takes effect in the eval path.")
+    # Path B Phase 0 diagnostics — mutually exclusive with each other and with the
+    # other "instead of train/eval" modes.
+    diag_modes = [
+        getattr(args, 'extract_prototypes', False),
+        getattr(args, 'extract_features', False),
+        getattr(args, 'diagnostic_per_layer_separability', False),
+        getattr(args, 'diagnostic_null_space_viability', False),
+    ]
+    if sum(bool(x) for x in diag_modes) > 1:
+        raise ValueError("Only one of --extract_prototypes, --extract_features, "
+                         "--diagnostic_per_layer_separability, "
+                         "--diagnostic_null_space_viability may be set at a time.")
+
+    # --- LORA ADAPTERS sanity checks ---
+    if getattr(args, 'use_lora_adapter', False):
+        if not args.use_prompts:
+            # E1 ablation (use_prompts=0 with LoRA) is legitimate; just flag it.
+            print("NOTE: --use_lora_adapter with use_prompts=0 → E1 ablation regime "
+                  "(LoRA replaces DP memory). See docs/MD-DETR/path_b_design.md §4 Axis G.")
+        if args.lora_rank <= 0:
+            raise ValueError("--lora_rank must be > 0 when --use_lora_adapter is set.")
+        if args.lora_lr_asymmetry_factor <= 0:
+            raise ValueError("--lora_lr_asymmetry_factor must be > 0.")
 
 def main(args):
 
@@ -390,7 +489,18 @@ def main(args):
 
     # Prototype extraction mode: runs instead of train/eval loop
     if args.extract_prototypes:
+        import torch.distributed as dist
+        rank = int(os.environ.get('RANK', 0))
+        world_size = int(os.environ.get('WORLD_SIZE', 1))
+        local_rank = int(os.environ.get('LOCAL_RANK', 0))
+        if world_size > 1 and not dist.is_initialized():
+            torch.cuda.set_device(local_rank)
+            dist.init_process_group(backend='nccl', timeout=timedelta(hours=12))
+
         args.task = str(args.n_tasks)
+        args.output_dir = out_dir_root
+        log_path = os.path.join(out_dir_root, 'extract_prototypes.log')
+        args.log_file = open(log_path, 'a') if rank == 0 else open(os.devnull, 'w')
         dummy_tr_ann = os.path.join(args.task_ann_dir, f'train_task_{args.n_tasks}.json')
         dummy_dataset = CocoDetection(img_folder=args.train_img_dir, ann_file=dummy_tr_ann, processor=processor)
         dummy_loader = DataLoader(dummy_dataset, collate_fn=dummy_dataset.collate_fn, batch_size=1, num_workers=0)
@@ -401,7 +511,72 @@ def main(args):
                                 test_dataset=dummy_dataset, args=args, local_evaluator=local_eval,
                                 task_id=args.n_tasks)
         from tools.extract_prototypes import run_prototype_extraction
-        run_prototype_extraction(args=args, processor=processor, out_dir_root=out_dir_root, trainer=trainer)
+        run_prototype_extraction(args=args, processor=processor, out_dir_root=out_dir_root,
+                                 trainer=trainer, rank=rank, world_size=world_size, local_rank=local_rank)
+        args.log_file.close()
+        return
+
+    # Feature extraction mode: runs instead of train/eval loop. Single-GPU only
+    # (DDP is broken on edith2 due to mixed GPU heterogeneity). Produces features.pt
+    # for offline linear-probe training.
+    if getattr(args, 'extract_features', False):
+        args.task = str(args.n_tasks)
+        args.output_dir = out_dir_root
+        log_path = os.path.join(out_dir_root, 'extract_features.log')
+        args.log_file = open(log_path, 'a')
+        dummy_tr_ann = os.path.join(args.task_ann_dir, f'train_task_{args.n_tasks}.json')
+        dummy_dataset = CocoDetection(img_folder=args.train_img_dir, ann_file=dummy_tr_ann, processor=processor)
+        dummy_loader = DataLoader(dummy_dataset, collate_fn=dummy_dataset.collate_fn, batch_size=1, num_workers=0)
+        coco_eval = CocoEvaluator(dummy_dataset.coco, args.iou_types)
+        local_eval = Evaluator(processor=processor, test_dataset=dummy_dataset, test_dataloader=dummy_loader,
+                               coco_evaluator=coco_eval, args=args, task_label2name=args.task_label2name, task_name='cur')
+        trainer = local_trainer(train_loader=dummy_loader, val_loader=dummy_loader,
+                                test_dataset=dummy_dataset, args=args, local_evaluator=local_eval,
+                                task_id=args.n_tasks)
+        from tools.extract_features import run_feature_extraction
+        run_feature_extraction(args=args, processor=processor, out_dir_root=out_dir_root, trainer=trainer)
+        args.log_file.close()
+        return
+
+    # Path B Phase 0 diagnostics — D1 (per-layer class separability) and D2
+    # (null-space viability for InfLoRA-style LoRA init). Single-GPU only.
+    # See docs/MD-DETR/path_b_design.md §7.
+    if getattr(args, 'diagnostic_per_layer_separability', False):
+        args.task = str(args.n_tasks)
+        args.output_dir = out_dir_root
+        log_path = os.path.join(out_dir_root, 'diagnostic_per_layer_separability.log')
+        args.log_file = open(log_path, 'a')
+        dummy_tr_ann = os.path.join(args.task_ann_dir, f'train_task_{args.n_tasks}.json')
+        dummy_dataset = CocoDetection(img_folder=args.train_img_dir, ann_file=dummy_tr_ann, processor=processor)
+        dummy_loader = DataLoader(dummy_dataset, collate_fn=dummy_dataset.collate_fn, batch_size=1, num_workers=0)
+        coco_eval = CocoEvaluator(dummy_dataset.coco, args.iou_types)
+        local_eval = Evaluator(processor=processor, test_dataset=dummy_dataset, test_dataloader=dummy_loader,
+                               coco_evaluator=coco_eval, args=args, task_label2name=args.task_label2name, task_name='cur')
+        trainer = local_trainer(train_loader=dummy_loader, val_loader=dummy_loader,
+                                test_dataset=dummy_dataset, args=args, local_evaluator=local_eval,
+                                task_id=args.n_tasks)
+        from tools.diagnostic_per_layer_separability import run_per_layer_separability
+        run_per_layer_separability(args=args, processor=processor, out_dir_root=out_dir_root, trainer=trainer)
+        args.log_file.close()
+        return
+
+    if getattr(args, 'diagnostic_null_space_viability', False):
+        args.task = str(args.n_tasks)
+        args.output_dir = out_dir_root
+        log_path = os.path.join(out_dir_root, 'diagnostic_null_space_viability.log')
+        args.log_file = open(log_path, 'a')
+        dummy_tr_ann = os.path.join(args.task_ann_dir, f'train_task_{args.n_tasks}.json')
+        dummy_dataset = CocoDetection(img_folder=args.train_img_dir, ann_file=dummy_tr_ann, processor=processor)
+        dummy_loader = DataLoader(dummy_dataset, collate_fn=dummy_dataset.collate_fn, batch_size=1, num_workers=0)
+        coco_eval = CocoEvaluator(dummy_dataset.coco, args.iou_types)
+        local_eval = Evaluator(processor=processor, test_dataset=dummy_dataset, test_dataloader=dummy_loader,
+                               coco_evaluator=coco_eval, args=args, task_label2name=args.task_label2name, task_name='cur')
+        trainer = local_trainer(train_loader=dummy_loader, val_loader=dummy_loader,
+                                test_dataset=dummy_dataset, args=args, local_evaluator=local_eval,
+                                task_id=args.n_tasks)
+        from tools.diagnostic_null_space_viability import run_null_space_viability
+        run_null_space_viability(args=args, processor=processor, out_dir_root=out_dir_root, trainer=trainer)
+        args.log_file.close()
         return
 
     checkpoint_callback = ModelCheckpoint(dirpath=args.output_dir, filename='{epoch}')
@@ -413,10 +588,9 @@ def main(args):
         args.log_file = open(out_dir_root+'/Task_'+str(task_id)+'_log.out', 'a')
         print('Logging: args ', args, file=args.log_file)
 
-        if task_id == 1:
-            args.epochs = 6
-        else:
-            args.epochs = 6
+        # args.epochs is controlled by the CLI (--epochs) / Hydra (experiment.epochs).
+        # Previously hardcoded to 6 here; removed April 21 2026 so smoke tests and
+        # epoch-count ablations can pass arbitrary values without a silent override.
 
         #args.switch = True
         args.task = str(task_id)
@@ -591,4 +765,15 @@ if __name__ == '__main__':
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     main(args)
 
-    utils.print_final(out_dir=out_dir, start_task=args.start_task, n_tasks=args.n_tasks)
+    # print_final aggregates per-task stats.txt into final_stats.txt. Extraction
+    # and diagnostic modes produce .pt / .txt files instead of stats.txt, so skip
+    # the aggregation to avoid a spurious FileNotFoundError crash after a
+    # successful run. Add any new "instead of train/eval" mode to this guard.
+    _skip_print_final = (
+        args.extract_prototypes
+        or getattr(args, 'extract_features', False)
+        or getattr(args, 'diagnostic_per_layer_separability', False)
+        or getattr(args, 'diagnostic_null_space_viability', False)
+    )
+    if not _skip_print_final:
+        utils.print_final(out_dir=out_dir, start_task=args.start_task, n_tasks=args.n_tasks)

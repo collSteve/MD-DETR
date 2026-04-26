@@ -38,6 +38,10 @@ def get_model_class(use_dual_memory_model: bool):
 
 from models.md_detr.modeling_md_detr import MDDetrForObjectDetection
 
+# Path B Variant A v1: per-task LoRA adapters on decoder FFN projections.
+# See docs/MD-DETR/phase_1_conceptual_plan.md.
+from models.adapters.lora import LoRALinear, patch_decoder_with_lora
+
 def find_param_nans(model):
     for name, p in model.named_parameters():
         if torch.isnan(p).any():
@@ -72,6 +76,9 @@ class local_trainer(pl.LightningModule):
 		detr_config.q_to_ek_strategy = args.q_to_ek_strategy
 		# --- End of change ---
 
+		# --- DynamicPrompt (required for loading DynamicPrompt checkpoints) ---
+		detr_config.use_dynamic_prompt = getattr(args, 'use_dynamic_prompt', False)
+
 		# --- Selective memory (anti-interference) ---
 		detr_config.use_selective_memory = getattr(args, 'use_selective_memory', False)
 		detr_config.memory_focus = getattr(args, 'memory_focus', 10.0)
@@ -91,6 +98,24 @@ class local_trainer(pl.LightningModule):
 			self.model = ModelClass(detr_config, default=not(args.mask_gradients),
 												 log_file=args.log_file)
 			self.processor = DeformableDetrImageProcessor()
+
+		# --- PATH B VARIANT A v1: LoRA on decoder FFN projections ---
+		# Must happen BEFORE any trainer.resume() is called (main.py issues resume
+		# after Trainer.__init__ returns). See docs/MD-DETR/phase_1_conceptual_plan.md §2.1.
+		if getattr(args, 'use_lora_adapter', False):
+			self.lora_layers = patch_decoder_with_lora(
+				self.model,
+				attach=args.lora_attach,
+				rank=args.lora_rank,
+				n_tasks=args.n_tasks,
+				lora_alpha=getattr(args, 'lora_alpha', None),
+			)
+			# Flag the current task so only its (A_t, B_t) slot is trainable.
+			# task_id is 1-indexed (main.py task loop); LoRALinear uses 0-indexed slots.
+			for _lora_mod in self.lora_layers:
+				_lora_mod.set_current_task(task_id - 1)
+		else:
+			self.lora_layers = []
 
 		# --- DUAL MEMORY / SINGLE MEMORY INITIALIZATION ---
 		if args.use_dual_memory_model:
@@ -228,7 +253,14 @@ class local_trainer(pl.LightningModule):
 
 		# print(f"Labels: {labels}")
 		orig_target_sizes = torch.stack([target["orig_size"] for target in labels], dim=0)
-		
+
+		# --- LoRA Pass-1 gating ---
+		# Pass 1 (memory-disabled query generation) must also be LoRA-disabled so
+		# query addresses don't drift across tasks. See phase_1_conceptual_plan.md §2.2.
+		if self.lora_layers:
+			for _lora_mod in self.lora_layers:
+				_lora_mod.lora_disabled = True
+
 		if self.args.use_prompts:
 			with torch.no_grad():
 				outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels,  train=False, task_id=self.task_id, switch_off_prompts=True)
@@ -260,7 +292,8 @@ class local_trainer(pl.LightningModule):
 						for j in ind[0]:
 							one_hot_proposals[i][j] = 1
 
-					if self.args.use_query_loss:
+					# query_tf lives on the prompts module; only exists when use_prompts=1.
+					if self.args.use_query_loss and self.args.use_prompts:
 						# print("Using query loss")
 						query_wt = self.model.model.prompts.query_tf(query.view(query.shape[0],-1))
 						query_loss = F.cross_entropy(query_wt, one_hot_proposals)
@@ -285,13 +318,24 @@ class local_trainer(pl.LightningModule):
 				class_names_batches.append([ stardardize_object_class_name(self.args.task_label2name[i]) for i in list_labels ])
 
 			
-			prompts = self.model.model.prompts
-			# Pass batch metadata to the prompt module so it can be used for recording
-			if hasattr(prompts, 'set_batch_metadata'):
-				img_ids = [l['image_id'].item() for l in labels]
-				prompts.set_batch_metadata(img_ids=img_ids, class_labels=class_names_batches)
+			# Only touch self.model.model.prompts when the memory module was
+			# actually instantiated (use_prompts=1). With use_prompts=0 the
+			# attribute doesn't exist; the model internally handles prompts=None
+			# (modeling_deformable_detr.py:1967-1970).
+			if self.args.use_prompts:
+				prompts = self.model.model.prompts
+				# Pass batch metadata to the prompt module so it can be used for recording
+				if hasattr(prompts, 'set_batch_metadata'):
+					img_ids = [l['image_id'].item() for l in labels]
+					prompts.set_batch_metadata(img_ids=img_ids, class_labels=class_names_batches)
 
-			prompts.set_activate_classes(class_names_batches)
+				prompts.set_activate_classes(class_names_batches)
+
+			# --- LoRA Pass-2 activation ---
+			# Un-gate LoRA so Pass 2's forward applies per-task weight adaptation.
+			if self.lora_layers:
+				for _lora_mod in self.lora_layers:
+					_lora_mod.lora_disabled = False
 
 			outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels, query=query, train=True, task_id=self.task_id)
 		else:
@@ -318,6 +362,15 @@ class local_trainer(pl.LightningModule):
 			loss_dict['ortho_intra'] = ortho_intra
 			loss += self.args.lambda_ortho_inter * ortho_inter + self.args.lambda_ortho_intra * ortho_intra
 
+		# --- O-LoRA soft-orthogonality penalty (Path B Variant A v1) ---
+		# Parameter-level regularization on LoRA A matrices across prior tasks.
+		# Computed once per training step (common_step is called once per step).
+		# See docs/MD-DETR/phase_1_conceptual_plan.md §2.5.
+		if train and self.lora_layers:
+			olora_loss = sum(m.get_olora_loss(self.args.lambda_olora) for m in self.lora_layers)
+			loss_dict['olora'] = olora_loss
+			loss += olora_loss
+
 		# Background suppression loss (uses Pass 2 matching for correct fg/bg labels)
 		if train and self.args.use_prompts and getattr(self.args, 'use_bg_suppression', False) and self.args.local_query:
 			prompts_bg = self.model.model.prompts
@@ -334,11 +387,20 @@ class local_trainer(pl.LightningModule):
 
 		if return_outputs:
 
-			# Prototype classifier swap (before mask_gradients)
-			if getattr(self.args, 'use_prototype_classifier', False):
+			# Classifier-head swap (before mask_gradients). Dispatches to either
+			# the prototype classifier (cosine-to-mean) or the trained linear probe.
+			# validate_prototype_config ensures at most one flag is set.
+			if getattr(self.args, 'use_prototype_classifier', False) or \
+			   getattr(self.args, 'use_linear_probe', False):
 				if self._prototype_store is None:
-					from models.prototype_classifier import PrototypeStore
-					self._prototype_store = PrototypeStore.load(self.args.prototypes_path, device=self.device)
+					if getattr(self.args, 'use_linear_probe', False):
+						from models.linear_probe import LinearProbeScorer
+						self._prototype_store = LinearProbeScorer.load(
+							self.args.linear_probe_path, device=self.device)
+					else:
+						from models.prototype_classifier import PrototypeStore
+						self._prototype_store = PrototypeStore.load(
+							self.args.prototypes_path, device=self.device)
 				proto_scores = self._prototype_store.score(
 					outputs.last_hidden_state,
 					temperature=getattr(self.args, 'prototype_temperature', 10.0),
@@ -363,10 +425,17 @@ class local_trainer(pl.LightningModule):
 	def training_step(self, batch, batch_idx): # automatic training schedule
 		loss, loss_dict = self.common_step(batch, batch_idx, train=True)
 		# logs metrics for each training_step
-		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL', 'ortho_inter':'O_i', 'ortho_intra':'O_a', 'bg_loss':'bg'}
+		short_map = {'loss_ce':'ce','loss_giou':'giou','cardinality_error':'car','training_loss':'tr','loss_bbox':'bbox', 'query_loss':'QL', 'ortho_inter':'O_i', 'ortho_intra':'O_a', 'bg_loss':'bg', 'olora':'oL'}
 		self.log("tr", loss, prog_bar=True)
 		for k,v in loss_dict.items():
 			self.log(short_map[k], v.item(), prog_bar=True)
+
+		# --- LoRA-norm logging (for Gate A and §2.8 monitoring) ---
+		# Log per-layer LoRA-norm ratios every 100 steps. Gate A checks ‖A_t‖/‖A_t_init‖ > 1.5
+		# per layer at end of Task 1. See docs/MD-DETR/phase_1_conceptual_plan.md §2.8 + §5.
+		if self.lora_layers and batch_idx % 100 == 0:
+			for i, _lora_mod in enumerate(self.lora_layers):
+				self.log(f'lora_norm_ratio_L{i}', _lora_mod.get_lora_norm_ratio(), prog_bar=False)
 
 		return loss
 
@@ -432,7 +501,7 @@ class local_trainer(pl.LightningModule):
 			missing_keys, unexpected_keys = self.model.load_state_dict(checkpoint['model'], strict=False)
 
 		if not self.args.eval and self.args.freeze:
-			
+
 			freeze = self.args.freeze.split(',')
 			for id, (name, params) in enumerate(self.model.named_parameters()):
 				params.requires_grad = True
@@ -443,6 +512,19 @@ class local_trainer(pl.LightningModule):
 						flag = True
 				if not flag:
 					print ('Trainable ..', name, "  Req grad .. ",params.requires_grad, file=self.args.log_file)
+
+			# LoRA requires_grad restoration (Path B Variant A v1).
+			# The freeze loop above walks param names split by '.' and matches
+			# against the freeze list (backbone,encoder,decoder,). LoRA's A_list
+			# and B_list live under layer.fc1 inside decoder, so their names
+			# contain the 'decoder' segment — the freeze loop clobbers their
+			# requires_grad to False, silently excluding them from the optimizer
+			# in configure_optimizers. Re-apply set_current_task post-freeze to
+			# restore the intended per-task trainability. See md_detr_code_gotchas.md
+			# "Freeze loop clobbers LoRA requires_grad" for the full story.
+			if getattr(self, 'lora_layers', None):
+				for _lora_mod in self.lora_layers:
+					_lora_mod.set_current_task(self.task_id - 1)
 	
 	def match_name_keywords(self, n, name_keywords):
 		out = False
@@ -455,7 +537,36 @@ class local_trainer(pl.LightningModule):
 	def configure_optimizers(self):
 		new_params = self.args.new_params.split(',')
 
-		if self.args.repo_name:
+		# --- LoRA LR asymmetry (Path B Variant A v1) ---
+		# When LoRA is active, split parameters into 4 groups so DP memory trains
+		# at lr / lora_lr_asymmetry_factor while LoRA and class_embed stay at lr.
+		# This mitigates the §2.8 gradient-attribution risk (DP memory absorbing
+		# all task-adaptation gradient, leaving LoRA dead at init).
+		if self.args.repo_name and getattr(self.args, 'use_lora_adapter', False):
+			lora_keywords = ['A_list', 'B_list']       # LoRALinear's per-task tensors
+			dp_memory_keywords = ['prompts']            # DP memory module params
+			class_embed_keywords = ['class_embed']
+			dp_lr = self.args.lr / float(self.args.lora_lr_asymmetry_factor)
+			param_dicts = [
+				{"params": [p for n, p in self.named_parameters()
+					if self.match_name_keywords(n, lora_keywords) and p.requires_grad],
+					"lr": self.args.lr},
+				{"params": [p for n, p in self.named_parameters()
+					if self.match_name_keywords(n, class_embed_keywords) and p.requires_grad],
+					"lr": self.args.lr},
+				{"params": [p for n, p in self.named_parameters()
+					if self.match_name_keywords(n, dp_memory_keywords)
+					and not self.match_name_keywords(n, lora_keywords)
+					and p.requires_grad],
+					"lr": dp_lr},
+				{"params": [p for n, p in self.named_parameters()
+					if not self.match_name_keywords(n, lora_keywords)
+					and not self.match_name_keywords(n, class_embed_keywords)
+					and not self.match_name_keywords(n, dp_memory_keywords)
+					and p.requires_grad],
+					"lr": self.args.lr_old},
+			]
+		elif self.args.repo_name:
 			param_dicts = [
 				{"params": [p for n, p in self.named_parameters()
 					if self.match_name_keywords(n, new_params) and p.requires_grad],

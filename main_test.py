@@ -272,6 +272,11 @@ def get_args_parser():
                         help='Output path for extracted prototypes (default: {output_dir}/prototypes.pt).')
     parser.add_argument('--prototype_checkpoint_path', default='', type=str,
                         help='Explicit checkpoint to load for extraction.')
+    parser.add_argument('--extract_batch_size', default=4, type=int,
+                        help='Batch size for prototype extraction (overrides --batch_size in extraction mode). '
+                             'Conservative default for 24GB GPU with Python fallback for deformable attention.')
+    parser.add_argument('--extract_num_workers', default=8, type=int,
+                        help='DataLoader workers for prototype extraction (overrides --num_workers in extraction mode).')
 
     return parser
 
@@ -391,6 +396,8 @@ def main(args):
     # Prototype extraction mode: runs instead of train/eval loop
     if args.extract_prototypes:
         args.task = str(args.n_tasks)
+        args.output_dir = out_dir_root
+        args.log_file = open(os.path.join(out_dir_root, 'extract_prototypes.log'), 'a')
         dummy_tr_ann = os.path.join(args.task_ann_dir, f'train_task_{args.n_tasks}.json')
         dummy_dataset = CocoDetection(img_folder=args.train_img_dir, ann_file=dummy_tr_ann, processor=processor)
         dummy_loader = DataLoader(dummy_dataset, collate_fn=dummy_dataset.collate_fn, batch_size=1, num_workers=0)
@@ -402,6 +409,7 @@ def main(args):
                                 task_id=args.n_tasks)
         from tools.extract_prototypes import run_prototype_extraction
         run_prototype_extraction(args=args, processor=processor, out_dir_root=out_dir_root, trainer=trainer)
+        args.log_file.close()
         return
 
     checkpoint_callback = ModelCheckpoint(dirpath=args.output_dir, filename='{epoch}')

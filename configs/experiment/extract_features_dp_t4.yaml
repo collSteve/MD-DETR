@@ -1,0 +1,32 @@
+defaults:
+  - _base
+
+exp_name:        extract_features_dp_t4
+train:           0
+
+# DynamicPrompt memory active at extraction — use the SAME feature space the
+# native DP eval sees. Memory weights come from the Task_4 checkpoint.
+use_prompts:       1
+use_dynamic_prompt: true
+
+# Stage 1 of the linear probe diagnostic (see docs/MD-DETR/path_b_design.md §E).
+# Accumulates raw per-proposal (feature, label) pairs via Hungarian matching
+# into features.pt — NOT per-class means. Mirrors the DP prototype extraction
+# protocol for direct comparability.
+extract_features:                    true
+feature_extraction_checkpoint_path:  /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_dynamic_correctness_a/Task_4/checkpoint05.pth
+features_out_path:                   ""   # defaults to <out_dir>/features.pt
+
+extract_batch_size:             16
+extract_num_workers:            8
+# Per-class cap for probe training set size.
+# 80 classes × 2000 = 160k samples × 256 dim × 4 bytes ≈ 160 MB on disk.
+# Enough for linear probe to converge; keeps file tractable.
+extract_max_samples_per_class:  2000
+
+# Hydra struct mode requires these keys even though they're dead in extract mode
+# (main.py's extract_features branch returns before the train/eval task loop).
+batch_size:        1
+epochs:            16
+save_epochs:       5
+eval_epochs:       2

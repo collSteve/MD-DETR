@@ -89,6 +89,8 @@ def main(cfg: DictConfig):
         "--prototype_temperature", str(cfg.experiment.get("prototype_temperature", 10.0)),
         "--prototypes_out_path", str(cfg.experiment.get("prototypes_out_path", "")),
         "--prototype_checkpoint_path", str(cfg.experiment.get("prototype_checkpoint_path", "")),
+        "--extract_batch_size", str(cfg.experiment.get("extract_batch_size", 4)),
+        "--extract_num_workers", str(cfg.experiment.get("extract_num_workers", 8)),
     ])
 
     # --- Correspondence embedding flags to the CLI call if they are true ---

@@ -16,11 +16,15 @@ class PrototypeStore:
     refactors of this class don't invalidate saved prototypes.
     """
 
-    def __init__(self, n_classes: int, d_model: int = 256):
+    def __init__(self, n_classes: int, d_model: int = 256, max_per_class: int = 0):
         self.n_classes = n_classes
         self.d_model = d_model
         self.sum_ = torch.zeros(n_classes, d_model)
         self.count = torch.zeros(n_classes, dtype=torch.int64)
+        # max_per_class: 0 = unlimited. Otherwise, stop adding to a class
+        # once count hits the cap. Class means are stable after a few hundred
+        # samples, so setting this to e.g. 500 cuts extraction work dramatically.
+        self.max_per_class = int(max_per_class)
         self.prototypes = None  # (n_classes, d_model), set by finalize()
         self.seen = None        # (n_classes,) bool, set by finalize()
 
@@ -29,10 +33,25 @@ class PrototypeStore:
 
         features: (M, d_model) float
         class_ids: (M,) int in [0, n_classes)
+
+        If max_per_class is set, entries for classes already at the cap are
+        silently dropped.
         """
         class_ids = class_ids.long()
+        if self.max_per_class > 0:
+            keep = self.count[class_ids] < self.max_per_class
+            if not keep.any():
+                return
+            features = features[keep]
+            class_ids = class_ids[keep]
         self.sum_.index_add_(0, class_ids, features.float())
         self.count.index_add_(0, class_ids, torch.ones_like(class_ids, dtype=torch.int64))
+
+    def is_full(self) -> bool:
+        """True iff every class has reached max_per_class. Always False when unlimited."""
+        if self.max_per_class <= 0:
+            return False
+        return bool((self.count >= self.max_per_class).all().item())
 
     def finalize(self):
         self.seen = self.count > 0

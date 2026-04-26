@@ -1,0 +1,36 @@
+defaults:
+  - _base
+
+# Gate B — re-run D1 (per-layer class separability) on the LoRA-trained Task-4
+# checkpoint. Compare layer-5 off-diagonal cosine to DP baseline (0.6138) at
+# ±2σ tolerance (σ from Pre-1b variance-baseline, see phase_1_conceptual_plan.md §3.2).
+
+exp_name:        diagnostic_per_layer_lora_v1
+train:           0
+
+use_prompts:     1
+use_dynamic_prompt: true
+
+# LoRA must be on so the D1 forward uses the LoRA-trained projections.
+use_lora_adapter:              true
+lora_rank:                     16
+lora_attach:                   "fc1"
+lambda_olora:                  0.5
+lora_lr_asymmetry_factor:      2.0
+
+# Run D1.
+diagnostic_per_layer_separability: true
+
+batch_size:      16
+epochs:          16
+save_epochs:     5
+eval_epochs:     2
+
+extract_batch_size: 16
+extract_num_workers: 8
+extract_max_samples_per_class: 500
+
+# Points at the LoRA-trained final-task checkpoint.
+checkpoint_dir:      /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_lora_v1/Task_1
+checkpoint_base:     checkpoint05.pth
+checkpoint_next:     checkpoint05.pth

@@ -1,0 +1,43 @@
+defaults:
+  - _base
+
+exp_name:          extract_prototypes_tier1_frozen
+train:             0
+
+# Tier 1 defining flag: memory module is NOT instantiated.
+# Decoder runs with prompts=None; self-attn K,V un-augmented (see
+# modeling_deformable_detr.py:1608-1644, 1967-1970).
+use_prompts:       0
+
+# Hydra struct-mode requires these keys even though several are dead in
+# extract mode:
+#   - batch_size: main.py:409-435 creates a dummy loader in extract mode and
+#     hands off to tools/extract_prototypes.py which uses extract_batch_size.
+#   - epochs/save_epochs/eval_epochs: used to construct pl.Trainer, but
+#     main.py's extract branch returns before pl.Trainer is used.
+# _base.yaml doesn't define them (leaf validate configs each set their own),
+# so we set them here. Values match validate_with_no_prompt.yaml for consistency.
+batch_size:        1
+epochs:            16
+save_epochs:       5
+eval_epochs:       2
+
+# Run prototype extraction instead of the train/eval task loop.
+# See main.py:409-435 — the extract branch runs, populates prototypes.pt, returns.
+extract_prototypes:       true
+prototypes_out_path:      ""   # defaults to <out_dir>/prototypes.pt
+
+# Load the DynamicPrompt Task-1 checkpoint directly — explicit path bypasses
+# extract_prototypes.py's own Task_N path-replace logic. engine.py:431-435
+# uses load_state_dict(strict=False), so the checkpoint's prompts.* keys
+# are silently dropped when use_prompts=0 (no prompts module to load into).
+prototype_checkpoint_path: /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_dynamic_correctness_a/Task_1/checkpoint05.pth
+
+# Extraction throughput — kernel-fix-enabled batch size.
+extract_batch_size:        16
+extract_num_workers:       8
+
+# Subsampling cap — 0 = unlimited. This is a floor baseline; pay the extra
+# wall-clock (~2-3 hr vs ~30-60 min at cap=500) for cleanest numbers.
+# Matches the user's stated preference for unsubsampled baseline prototypes.
+extract_max_samples_per_class: 0

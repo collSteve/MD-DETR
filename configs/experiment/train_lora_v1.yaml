@@ -1,0 +1,39 @@
+defaults:
+  - _base
+
+# Path B Variant A v1 — training config.
+# See docs/MD-DETR/phase_1_conceptual_plan.md for the full spec + rationale.
+#
+# What this trains: per-task LoRA adapters (rank 16) on decoder fc1 inputs,
+# COEXISTING with DynamicPrompt memory (use_prompts=1 — E2 regime). Both the
+# memory module's current-task slot and the LoRA's current-task slot train
+# jointly per task. This is "Strategy 1" from-scratch CL training (starts from
+# HF pretrained Deformable DETR; Task t loads the Task-(t-1) output checkpoint
+# from THIS run, NOT from any DP baseline).
+
+exp_name:        train_lora_v1
+train:           1
+
+# Memory module — keep DP active (Axis G = E2 coexist).
+use_prompts:      1
+use_dynamic_prompt: true
+
+# Training schedule matches DP baseline.
+batch_size:      1
+epochs:          6
+save_epochs:     5
+eval_epochs:     2
+
+# LoRA adapter config (Variant A v1 spec).
+use_lora_adapter:              true
+lora_rank:                     16
+lora_attach:                   "fc1"        # flipping to fc1_fc2/fc2 is a one-line ablation
+lambda_olora:                  0.5
+lora_lr_asymmetry_factor:      2.0
+
+# HF pretrained starting point — Task 1 starts here; Task 2+ continues from
+# the prior task's output checkpoint (handled automatically by main.py task loop).
+# These checkpoint paths are only consulted if args.eval is set, which it isn't for training.
+checkpoint_dir:      /ubc/cs/research/shield/projects/kren04/MD_DETR_runs/train_lora_v1/Task_1
+checkpoint_base:     checkpoint05.pth
+checkpoint_next:     checkpoint05.pth
